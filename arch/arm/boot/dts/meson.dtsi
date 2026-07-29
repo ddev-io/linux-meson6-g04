@@ -90,25 +90,25 @@
 			status = "disabled";
 		};
 
-		uart_A: serial@c81084c0 {
+		uart_A: serial@c11084c0 {
 			compatible = "amlogic,meson-uart";
-			reg = <0xc81084c0 0x14>;
+			reg = <0xc11084c0 0x14>;
 			interrupts = <0 90 1>;
 			clocks = <&clk81>;
 			status = "disabled";
 		};
 
-		uart_B: serial@c81084dc {
+		uart_B: serial@c11084dc {
 			compatible = "amlogic,meson-uart";
-			reg = <0xc81084dc 0x14>;
+			reg = <0xc11084dc 0x14>;
 			interrupts = <0 90 1>;
 			clocks = <&clk81>;
 			status = "disabled";
 		};
 
-		uart_C: serial@c8108700 {
+		uart_C: serial@c1108700 {
 			compatible = "amlogic,meson-uart";
-			reg = <0xc8108700 0x14>;
+			reg = <0xc1108700 0x14>;
 			interrupts = <0 90 1>;
 			clocks = <&clk81>;
 			status = "disabled";
