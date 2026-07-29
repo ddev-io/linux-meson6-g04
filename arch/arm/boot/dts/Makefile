@@ -177,6 +177,7 @@ dtb-$(CONFIG_MACH_KIRKWOOD) += kirkwood-b3.dtb \
 dtb-$(CONFIG_ARCH_LPC32XX) += ea3250.dtb phy3250.dtb
 dtb-$(CONFIG_ARCH_MARCO) += marco-evb.dtb
 dtb-$(CONFIG_MACH_MESON6) += meson6-atv1200.dtb
+dtb-$(CONFIG_MACH_MESON6) += meson6-g04.dtb
 dtb-$(CONFIG_ARCH_MMP) += pxa168-aspenite.dtb \
 	pxa910-dkb.dtb \
 	mmp2-brownstone.dtb

@@ -1,0 +1,29 @@
+/dts-v1/;
+
+/include/ "meson6.dtsi"
+
+/ {
+	model = "Amlogic AML8726-MX G04 / VB100a Pro";
+	compatible = "ddev-io,meson6-g04", "amlogic,meson6";
+
+	aliases {
+		serial0 = &uart_A;
+	};
+
+	memory {
+		device_type = "memory";
+		/* Keep the vendor G04 video/reserved window out of Linux RAM. */
+		reg = <0x80000000 0x04000000>,
+		      <0x90d00000 0x0f200000>,
+		      <0xa0000000 0x20000000>;
+	};
+
+	chosen {
+		stdout-path = &uart_A;
+		bootargs = "console=ttyAML0,115200n8 earlyprintk";
+	};
+};
+
+&uart_A {
+	status = "okay";
+};
