@@ -1,0 +1,21 @@
+Goodix GT82X touchscreen on the Meson6 G04 tablet
+
+Required properties:
+- compatible: must be "goodix,gt82x-g04"
+- reg: I2C address, normally <0x5d>
+- interrupts: GIC interrupt fed by the configured Meson6 GPIO IRQ router
+- interrupt-gpios: GPIO connected to the controller interrupt output
+- power-gpios: GPIO controlling touchscreen power
+- reset-gpios: active-low reset GPIO
+
+Example:
+
+	touchscreen@5d {
+		compatible = "goodix,gt82x-g04";
+		reg = <0x5d>;
+		interrupt-parent = <&gic>;
+		interrupts = <0 64 1>;
+		interrupt-gpios = <&gpio_a 16 0>;
+		power-gpios = <&gpio_a 23 0>;
+		reset-gpios = <&gpio_c 3 0>;
+	};

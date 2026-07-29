@@ -91,4 +91,14 @@
 	pinctrl-names = "default";
 	pinctrl-0 = <&i2c_a_pins>;
 	status = "okay";
+
+	touchscreen@5d {
+		compatible = "goodix,gt82x-g04";
+		reg = <0x5d>;
+		interrupt-parent = <&gic>;
+		interrupts = <0 64 1>;
+		interrupt-gpios = <&gpio_a 16 0>;
+		power-gpios = <&gpio_a 23 0>;
+		reset-gpios = <&gpio_c 3 0>;
+	};
 };

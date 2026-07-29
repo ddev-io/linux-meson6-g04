@@ -295,6 +295,13 @@ config TOUCHSCREEN_FUJITSU
 	  To compile this driver as a module, choose M here: the
 	  module will be called fujitsu-ts.
 
+config TOUCHSCREEN_GT82X_G04
+	tristate "Goodix GT82X touchscreen for Meson6 G04"
+	depends on I2C && OF_GPIO
+	help
+	  Say Y here for the Goodix GT82X touchscreen fitted to the Amlogic
+	  Meson6 G04 / VB100a Pro tablet.
+
 config TOUCHSCREEN_GOODIX
 	tristate "Goodix I2C touchscreen"
 	depends on I2C && ACPI
