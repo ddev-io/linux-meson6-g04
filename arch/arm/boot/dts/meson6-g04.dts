@@ -22,8 +22,73 @@
 		stdout-path = &uart_A;
 		bootargs = "console=ttyAML0,115200n8 earlyprintk";
 	};
+
+	soc {
+		g04_pinmux: pinmux@c11080b0 {
+			compatible = "pinctrl-single";
+			reg = <0xc11080b0 0x20>;
+			pinctrl-single,register-width = <32>;
+			pinctrl-single,function-mask = <1>;
+			pinctrl-single,bit-per-mux;
+
+			i2c_a_pins: i2c-a-pins {
+				/* PERIPHS_PIN_MUX_5[27:26] selects I2C A. */
+				pinctrl-single,bits = <0x14 0x0c000000 0x0c000000>;
+			};
+
+			gpio_a_touch_pins: gpio-a-touch-pins {
+				/* GPIOA_16: MUX0[6], MUX7[4]; GPIOA_23: MUX0[6], MUX7[11]. */
+				pinctrl-single,bits = <0x00 0x00000000 0x00000040>,
+						      <0x1c 0x00000000 0x00000810>;
+			};
+
+			gpio_c_touch_pins: gpio-c-touch-pins {
+				/* GPIOC_3: PERIPHS_PIN_MUX_0[13] and _1[8]. */
+				pinctrl-single,bits = <0x00 0x00000000 0x00002000>,
+						      <0x04 0x00000000 0x00000100>;
+			};
+		};
+
+		gpio_a: gpio@c1108030 {
+			compatible = "amlogic,meson6-gpio";
+			reg = <0xc1108030 0x4>,
+			      <0xc1108034 0x4>,
+			      <0xc1108038 0x4>,
+			      <0xc1109880 0x10>;
+			gpio-controller;
+			#gpio-cells = <2>;
+			ngpios = <28>;
+			pinctrl-names = "default";
+			pinctrl-0 = <&gpio_a_touch_pins>;
+
+			/* Route GPIOA_16 (vendor selector 170) through slot 0. */
+			amlogic,irq-slot = <0>;
+			amlogic,irq-selector = <170>;
+			amlogic,irq-trigger = <3>;
+			amlogic,irq-filter = <7>;
+		};
+
+		gpio_c: gpio@c1108048 {
+			compatible = "amlogic,meson6-gpio";
+			reg = <0xc1108048 0x4>,
+			      <0xc110804c 0x4>,
+			      <0xc1108050 0x4>;
+			gpio-controller;
+			#gpio-cells = <2>;
+			ngpios = <15>;
+			pinctrl-names = "default";
+			pinctrl-0 = <&gpio_c_touch_pins>;
+		};
+	};
 };
 
 &uart_A {
+	status = "okay";
+};
+
+&i2c_A {
+	clock-frequency = <300000>;
+	pinctrl-names = "default";
+	pinctrl-0 = <&i2c_a_pins>;
 	status = "okay";
 };
