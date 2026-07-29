@@ -1,0 +1,42 @@
+Amlogic Meson6 GPIO controller
+
+Required properties:
+- compatible: must be "amlogic,meson6-gpio"
+- reg: three register regions, in this order: direction (EN_N), output and
+  input
+- gpio-controller: marks the node as a GPIO controller
+- #gpio-cells: must be <2>; the first cell is the line offset and the second
+  cell contains GPIO flags
+- ngpios: number of GPIO lines implemented by the bank
+
+The EN_N direction register is active low: a set bit selects input mode and a
+clear bit selects output mode.
+
+Optional GPIO interrupt router properties:
+- a fourth reg region containing EDGE_POL, SEL0, SEL1 and FILTER
+- amlogic,irq-slot: router slot number, 0 through 7
+- amlogic,irq-selector: Meson6 vendor pad selector, 0 through 255
+- amlogic,irq-trigger: 0 for high level, 1 for low level, 2 for rising edge,
+  or 3 for falling edge
+- amlogic,irq-filter: router filter value, 0 through 7
+
+The four amlogic,irq-* properties and the fourth register region must be
+present together. The router feeds a separate GIC interrupt, so consumers
+describe that GIC interrupt directly.
+
+Example:
+
+	gpio_a: gpio@c1108030 {
+		compatible = "amlogic,meson6-gpio";
+		reg = <0xc1108030 0x4>,
+		      <0xc1108034 0x4>,
+		      <0xc1108038 0x4>,
+		      <0xc1109880 0x10>;
+		gpio-controller;
+		#gpio-cells = <2>;
+		ngpios = <28>;
+		amlogic,irq-slot = <0>;
+		amlogic,irq-selector = <170>;
+		amlogic,irq-trigger = <3>;
+		amlogic,irq-filter = <7>;
+	};
