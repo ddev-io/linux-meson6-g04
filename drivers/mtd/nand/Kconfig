@@ -524,4 +524,19 @@ config MTD_NAND_SUNXI
 	help
 	  Enables support for NAND Flash chips on Allwinner SoCs.
 
+
+config MTD_NAND_MESON6_AML
+	tristate "Amlogic Meson6 vendor-compatible NAND controller"
+	depends on ARCH_MESON
+	default y if MACH_MESON6
+	help
+	  Vendor-format-compatible NAND controller for AML8726-MX/Meson6.
+
+config MTD_NAND_MESON6_AML_NFTL
+	tristate "Amlogic legacy NFTL block translation"
+	depends on MTD_NAND_MESON6_AML
+	default n
+	help
+	  Exposes the legacy avnftl block devices used by early Android.
+
 endif # MTD_NAND

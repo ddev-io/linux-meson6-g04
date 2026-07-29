@@ -15,6 +15,15 @@ config GENERIC_PHY
 	  phy users can obtain reference to the PHY. All the users of this
 	  framework should select this config.
 
+config PHY_MESON6_USB2
+	tristate "Amlogic Meson6 USB2 PHY driver"
+	depends on MACH_MESON6 || COMPILE_TEST
+	depends on OF && HAS_IOMEM
+	select GENERIC_PHY
+	help
+	  Enable the USB2 PHY and clock/reset sequence used by the Meson6
+	  USB-A DWC2 controller.
+
 config PHY_BERLIN_USB
 	tristate "Marvell Berlin USB PHY Driver"
 	depends on ARCH_BERLIN && RESET_CONTROLLER && HAS_IOMEM && OF

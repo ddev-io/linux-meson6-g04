@@ -13,6 +13,13 @@
 # both kinds of controller can also support "USB On-the-Go" (CONFIG_USB_OTG).
 #
 
+config USB_G_ANDROID_ADB
+	tristate "Legacy Android ADB gadget"
+	select USB_LIBCOMPOSITE
+	help
+	  Provides the /dev/android_adb and /dev/android_adb_enable ABI used
+	  by Android 4.1-era adbd and early TWRP recovery environments.
+
 config USB_ZERO
 	tristate "Gadget Zero (DEVELOPMENT)"
 	select USB_LIBCOMPOSITE
