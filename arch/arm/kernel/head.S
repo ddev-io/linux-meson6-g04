@@ -36,6 +36,7 @@
  */
 #define KERNEL_RAM_VADDR	(PAGE_OFFSET + TEXT_OFFSET)
 #define G04_BREADCRUMB_ADDR	0x8a300000
+#define G04_RAW_BOOT_DTB_ADDR	0x80fc0000
 
 	.macro	g04_breadcrumb value
 	ldr	r11, =G04_BREADCRUMB_ADDR
@@ -128,6 +129,14 @@ ENTRY(stext)
 	 * r1 = machine no, r2 = atags or dtb,
 	 * r8 = phys_offset, r9 = cpuid, r10 = procinfo
 	 */
+#ifdef CONFIG_MESON6_G04_RAW_BOOT_DTB
+	/*
+	 * The factory Meson6 U-Boot enters an LZMA-wrapped raw Image and does
+	 * not supply a DTB.  The recovery packer places the verified G04 DTB
+	 * above the kernel BSS at this fixed physical address.
+	 */
+	ldr	r2, =G04_RAW_BOOT_DTB_ADDR
+#endif
 	bl	__vet_atags
 #ifdef CONFIG_SMP_ON_UP
 	bl	__fixup_smp

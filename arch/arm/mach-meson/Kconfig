@@ -11,6 +11,15 @@ config MACH_MESON6
 	default ARCH_MESON
 	select MESON6_TIMER
 
+config MESON6_G04_RAW_BOOT_DTB
+	bool "Inject the G04 DTB address for raw Image boot"
+	depends on MACH_MESON6
+	help
+	  Enable this only for the G04 recovery raw-Image build.  The factory
+	  Meson6 U-Boot does not pass a device tree when it decompresses an
+	  LZMA uImage, so early head.S supplies the fixed address where the
+	  recovery packer places meson6-g04.dtb.
+
 config MACH_MESON8
 	bool "Amlogic Meson8 SoCs support"
 	default ARCH_MESON
