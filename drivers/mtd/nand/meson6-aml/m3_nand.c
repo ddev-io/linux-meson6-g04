@@ -1476,13 +1476,9 @@ ssize_t show_nand_version_info(struct class *class,
 static struct mtd_partition normal_partition_info[] = {
 	{ .name = "logo",      .offset = 72 * SZ_1M,   .size = 8 * SZ_1M },
 	{ .name = "aml_logo",  .offset = 88 * SZ_1M,   .size = 8 * SZ_1M },
-	/* Ends at 120 MiB, leaving 16 MiB before the fixed boot offset. */
 	{ .name = "recovery",  .offset = 104 * SZ_1M,  .size = 16 * SZ_1M },
-	{ .name = "boot",      .offset = 136 * SZ_1M,  .size = 8 * SZ_1M },
-	{ .name = "system",    .offset = 168 * SZ_1M,  .size = 768 * SZ_1M },
-	{ .name = "factory",   .offset = 936 * SZ_1M,  .size = 128 * SZ_1M },
-	{ .name = "cache",     .offset = 1064 * SZ_1M, .size = 128 * SZ_1M },
-	{ .name = "userdata",  .offset = 1192 * SZ_1M, .size = 2304ULL * SZ_1M },
+	{ .name = "boot",      .offset = 136 * SZ_1M,  .size = 32 * SZ_1M },
+	{ .name = "misc",      .offset = 184 * SZ_1M,  .size = 8 * SZ_1M },
 	{ .name = "NFTL_Part", .offset = MTDPART_OFS_APPEND,
 	  .size = MTDPART_SIZ_FULL },
 };
