@@ -110,6 +110,21 @@
 		.endm
 
 		.section ".start", #alloc, #execinstr
+
+		.macro	g04_breadcrumb value
+		ldr	r10, =0x8a300000
+		ldr	r11, =\value
+		str	r11, [r10]
+		mcr	p15, 0, r10, c7, c14, 1	@ clean/invalidate marker line
+		mov	r11, #0
+		mcr	p15, 0, r11, c7, c10, 4	@ drain write buffer
+		.endm
+
+		.macro	g04_breadcrumb_saved value
+		stmfd	sp!, {r10-r11, lr}
+		g04_breadcrumb \value
+		ldmfd	sp!, {r10-r11, lr}
+		.endm
 /*
  * sort out different calling conventions
  */
@@ -133,6 +148,7 @@ start:
  THUMB(		.thumb			)
 1:
  ARM_BE8(	setend	be )			@ go BE8 if compiled for BE8
+		g04_breadcrumb 0x47313031	@ G101: zImage entered
 		mrs	r9, cpsr
 #ifdef CONFIG_ARM_VIRT_EXT
 		bl	__hyp_stub_install	@ get into SVC mode, reversibly
@@ -153,6 +169,7 @@ start:
  THUMB(		svc	0xab		)	@ angel_SWI_THUMB
 not_angel:
 		safe_svcmode_maskall r0
+		g04_breadcrumb 0x47313032	@ G102: SVC mode established
 		msr	spsr_cxsf, r9		@ Save the CPU boot mode in
 						@ SPSR
 		/*
@@ -189,6 +206,7 @@ not_angel:
 		cmpcc	r4, r0
 		orrcc	r4, r4, #1		@ remember we skipped cache_on
 		blcs	cache_on
+		g04_breadcrumb 0x47313033	@ G103: decompressor cache setup done
 
 restart:	adr	r0, LC0
 		ldmia	r0, {r1, r2, r3, r6, r10, r11, r12}
@@ -425,6 +443,7 @@ dtb_check_done:
 		mov	pc, r0
 
 wont_overwrite:
+		g04_breadcrumb_saved 0x47313034	@ G104: relocation and DTB setup done
 /*
  * If delta is zero, we are running at the address we were linked at.
  *   r0  = delta
@@ -513,9 +532,12 @@ not_relocated:	mov	r0, #0
 		mov	r1, sp			@ malloc space above stack
 		add	r2, sp, #0x10000	@ 64k max
 		mov	r3, r7
+		g04_breadcrumb_saved 0x47313035	@ G105: about to decompress kernel
 		bl	decompress_kernel
+		g04_breadcrumb_saved 0x47313036	@ G106: decompression completed
 		bl	cache_clean_flush
 		bl	cache_off
+		g04_breadcrumb_saved 0x47313037	@ G107: caches off, entering kernel
 		mov	r1, r7			@ restore architecture number
 		mov	r2, r8			@ restore atags pointer
 

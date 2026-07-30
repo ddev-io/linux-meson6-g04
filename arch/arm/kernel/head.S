@@ -35,6 +35,13 @@
  * relax this restriction to KERNEL_RAM_VADDR >= PAGE_OFFSET + 0x4000.
  */
 #define KERNEL_RAM_VADDR	(PAGE_OFFSET + TEXT_OFFSET)
+#define G04_BREADCRUMB_ADDR	0x8a300000
+
+	.macro	g04_breadcrumb value
+	ldr	r11, =G04_BREADCRUMB_ADDR
+	ldr	r12, =\value
+	str	r12, [r11]
+	.endm
 #if (KERNEL_RAM_VADDR & 0xffff) != 0x8000
 #error KERNEL_RAM_VADDR must start at 0xXXXX8000
 #endif
@@ -79,6 +86,7 @@
 	__HEAD
 ENTRY(stext)
  ARM_BE8(setend	be )			@ ensure we are in BE8 mode
+	g04_breadcrumb 0x47323031		@ G201: decompressed kernel entered
 
  THUMB(	adr	r9, BSYM(1f)	)	@ Kernel is always entered in ARM.
  THUMB(	bx	r9		)	@ If this is a Thumb-2 kernel,
@@ -90,9 +98,11 @@ ENTRY(stext)
 #endif
 	@ ensure svc mode and all interrupts masked
 	safe_svcmode_maskall r9
+	g04_breadcrumb 0x47323032		@ G202: kernel SVC mode established
 
 	mrc	p15, 0, r9, c0, c0		@ get processor id
 	bl	__lookup_processor_type		@ r5=procinfo r9=cpuid
+	g04_breadcrumb 0x47323033		@ G203: processor type found
 	movs	r10, r5				@ invalid processor (r5=0)?
  THUMB( it	eq )		@ force fixup-able long branch encoding
 	beq	__error_p			@ yes, error 'p'
@@ -126,6 +136,7 @@ ENTRY(stext)
 	bl	__fixup_pv_table
 #endif
 	bl	__create_page_tables
+	g04_breadcrumb 0x47323034		@ G204: initial page tables created
 
 	/*
 	 * The following calls CPU specific code in a position independent
