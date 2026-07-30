@@ -32,6 +32,19 @@ config ANDROID_BINDER_IPC_32BIT
 
 	  Note that enabling this will break newer Android user-space.
 
+config ANDROID_RAM_CONSOLE
+	bool "Android RAM buffer console"
+	depends on OF
+	default n
+	help
+	  Keep the kernel console in a reserved RAM ring buffer.  On the next
+	  boot, the previous contents are exposed through /proc/last_kmsg.
+
+config ANDROID_RAM_CONSOLE_ENABLE_VERBOSE
+	bool "Enable verbose messages on the Android RAM console"
+	depends on ANDROID_RAM_CONSOLE
+	default y
+
 endif # if ANDROID
 
 endmenu
