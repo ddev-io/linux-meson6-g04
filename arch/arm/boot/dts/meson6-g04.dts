@@ -33,18 +33,18 @@
 	memory {
 		device_type = "memory";
 		/*
-		 * 0x84000000-0x840fffff is the persistent Android ram_console.
-		 * The framebuffer starts at 0x84100000, so the whole vendor G04
-		 * video/reserved window remains outside Linux RAM.
+		 * The vendor G04 video/reserved window remains outside Linux RAM.
+		 * Recovery does not register the vendor deinterlace device, so its
+		 * first MiB at 0x8a300000 is used for the diagnostic ram_console.
 		 */
 		reg = <0x80000000 0x04000000>,
 		      <0x90d00000 0x0f200000>,
 		      <0xa0000000 0x20000000>;
 	};
 
-	ram_console: ram-console@84000000 {
+	ram_console: ram-console@8a300000 {
 		compatible = "google,ram-console";
-		reg = <0x84000000 0x00100000>;
+		reg = <0x8a300000 0x00100000>;
 	};
 
 	chosen {

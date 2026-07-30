@@ -45,6 +45,24 @@ config ANDROID_RAM_CONSOLE_ENABLE_VERBOSE
 	depends on ANDROID_RAM_CONSOLE
 	default y
 
+config ANDROID_RAM_CONSOLE_EARLY_INIT
+	bool "Initialize Android RAM console before platform drivers"
+	depends on ANDROID_RAM_CONSOLE
+	default n
+	help
+	  Map and register the persistent RAM console during console_init.
+	  This captures the existing printk ring before device probing starts.
+
+config ANDROID_RAM_CONSOLE_EARLY_PHYS_ADDR
+	hex "Physical address of the early Android RAM console"
+	depends on ANDROID_RAM_CONSOLE_EARLY_INIT
+	default 0x8a300000
+
+config ANDROID_RAM_CONSOLE_EARLY_SIZE
+	hex "Size of the early Android RAM console"
+	depends on ANDROID_RAM_CONSOLE_EARLY_INIT
+	default 0x00100000
+
 endif # if ANDROID
 
 endmenu

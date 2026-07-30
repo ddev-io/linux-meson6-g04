@@ -331,10 +331,21 @@ static int __init ram_console_init(struct ram_console_buffer *buffer,
 #ifdef CONFIG_ANDROID_RAM_CONSOLE_EARLY_INIT
 static int __init ram_console_early_init(void)
 {
-	return ram_console_init((struct ram_console_buffer *)
-		CONFIG_ANDROID_RAM_CONSOLE_EARLY_ADDR,
-		CONFIG_ANDROID_RAM_CONSOLE_EARLY_SIZE,
-		NULL,
+	void *buffer;
+
+	buffer = ioremap(CONFIG_ANDROID_RAM_CONSOLE_EARLY_PHYS_ADDR,
+			 CONFIG_ANDROID_RAM_CONSOLE_EARLY_SIZE);
+	if (!buffer) {
+		pr_err("ram_console: failed to map early buffer at 0x%08x\n",
+		       CONFIG_ANDROID_RAM_CONSOLE_EARLY_PHYS_ADDR);
+		return -ENOMEM;
+	}
+
+	pr_info("ram_console: early buffer at 0x%08x, size 0x%x\n",
+		CONFIG_ANDROID_RAM_CONSOLE_EARLY_PHYS_ADDR,
+		CONFIG_ANDROID_RAM_CONSOLE_EARLY_SIZE);
+	return ram_console_init(buffer,
+		CONFIG_ANDROID_RAM_CONSOLE_EARLY_SIZE, NULL,
 		ram_console_old_log_init_buffer);
 }
 #else
