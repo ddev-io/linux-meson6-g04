@@ -193,6 +193,15 @@ enum dwc2_lx_state {
 	DWC2_L3,	/* Off state */
 };
 
+/* Gadget ep0 states */
+enum dwc2_ep0_state {
+	DWC2_EP0_SETUP,
+	DWC2_EP0_DATA_IN,
+	DWC2_EP0_DATA_OUT,
+	DWC2_EP0_STATUS_IN,
+	DWC2_EP0_STATUS_OUT,
+};
+
 /**
  * struct dwc2_core_params - Parameters for configuring the core
  *
@@ -557,7 +566,7 @@ struct dwc2_hw_params {
  * @ep0_buff:           Buffer for EP0 reply data, if needed.
  * @ctrl_buff:          Buffer for EP0 control requests.
  * @ctrl_req:           Request for EP0 control packets.
- * @setup:              NAK management for EP0 SETUP
+ * @ep0_state:          EP0 control transfer state
  * @last_rst:           Time of last reset
  * @eps:                The endpoints being supplied to the gadget framework
  */
@@ -690,7 +699,7 @@ struct dwc2_hsotg {
 	struct usb_gadget gadget;
 	unsigned int enabled:1;
 	unsigned int connected:1;
-	unsigned int setup:1;
+	enum dwc2_ep0_state ep0_state;
 	unsigned long last_rst;
 	struct s3c_hsotg_ep *eps;
 #endif /* CONFIG_USB_DWC2_PERIPHERAL || CONFIG_USB_DWC2_DUAL_ROLE */

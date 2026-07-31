@@ -649,14 +649,11 @@ static void s3c_hsotg_start_req(struct dwc2_hsotg *hsotg,
 	else
 		epsize = 0;
 
-	if (index != 0 && ureq->zero) {
-		/*
-		 * test for the packets being exactly right for the
-		 * transfer
-		 */
-
-		if (length == (packets * hs_ep->ep.maxpacket))
-			packets++;
+	/* Program a zero-length packet on its own transfer. */
+	if (dir_in && ureq->zero && !continuing) {
+		if (ureq->length >= hs_ep->ep.maxpacket &&
+		    !(ureq->length % hs_ep->ep.maxpacket))
+			hs_ep->sent_zlp = 1;
 	}
 
 	epsize |= DXEPTSIZ_PKTCNT(packets);
@@ -689,14 +686,11 @@ static void s3c_hsotg_start_req(struct dwc2_hsotg *hsotg,
 	ctrl |= DXEPCTL_EPENA;	/* ensure ep enabled */
 	ctrl |= DXEPCTL_USBACTEP;
 
-	dev_dbg(hsotg->dev, "setup req:%d\n", hsotg->setup);
+	dev_dbg(hsotg->dev, "ep0 state:%d\n", hsotg->ep0_state);
 
 	/* For Setup request do not clear NAK */
-	if (hsotg->setup && index == 0)
-		hsotg->setup = 0;
-	else
+	if (!(index == 0 && hsotg->ep0_state == DWC2_EP0_SETUP))
 		ctrl |= DXEPCTL_CNAK;	/* clear NAK set by core */
-
 
 	dev_dbg(hsotg->dev, "%s: DxEPCTL=0x%08x\n", __func__, ctrl);
 	writel(ctrl, hsotg->regs + epctrl_reg);
@@ -909,13 +903,12 @@ static int s3c_hsotg_send_reply(struct dwc2_hsotg *hsotg,
 
 	req->buf = hsotg->ep0_buff;
 	req->length = length;
-	req->zero = 1; /* always do zero-length final transfer */
+	/* The status stage is tracked separately from DATA IN ZLPs. */
+	req->zero = 0;
 	req->complete = s3c_hsotg_complete_oursetup;
 
 	if (length)
 		memcpy(req->buf, buff, length);
-	else
-		ep->sent_zlp = 1;
 
 	ret = s3c_hsotg_ep_queue(&ep->ep, req, GFP_ATOMIC);
 	if (ret) {
@@ -1129,30 +1122,25 @@ static void s3c_hsotg_process_control(struct dwc2_hsotg *hsotg,
 	int ret = 0;
 	u32 dcfg;
 
-	ep0->sent_zlp = 0;
-
 	dev_dbg(hsotg->dev, "ctrl Req=%02x, Type=%02x, V=%04x, L=%04x\n",
 		 ctrl->bRequest, ctrl->bRequestType,
 		 ctrl->wValue, ctrl->wLength);
 
-	/*
-	 * record the direction of the request, for later use when enquing
-	 * packets onto EP0.
-	 */
-
-	ep0->dir_in = (ctrl->bRequestType & USB_DIR_IN) ? 1 : 0;
-	dev_dbg(hsotg->dev, "ctrl: dir_in=%d\n", ep0->dir_in);
-
-	/*
-	 * if we've no data with this request, then the last part of the
-	 * transaction is going to implicitly be IN.
-	 */
-	if (ctrl->wLength == 0)
+	if (ctrl->wLength == 0) {
 		ep0->dir_in = 1;
+		hsotg->ep0_state = DWC2_EP0_STATUS_IN;
+	} else if (ctrl->bRequestType & USB_DIR_IN) {
+		ep0->dir_in = 1;
+		hsotg->ep0_state = DWC2_EP0_DATA_IN;
+	} else {
+		ep0->dir_in = 0;
+		hsotg->ep0_state = DWC2_EP0_DATA_OUT;
+	}
 
 	if ((ctrl->bRequestType & USB_TYPE_MASK) == USB_TYPE_STANDARD) {
 		switch (ctrl->bRequest) {
 		case USB_REQ_SET_ADDRESS:
+			hsotg->connected = 1;
 			dcfg = readl(hsotg->regs + DCFG);
 			dcfg &= ~DCFG_DEVADDR_MASK;
 			dcfg |= (le16_to_cpu(ctrl->wValue) <<
@@ -1247,6 +1235,8 @@ static void s3c_hsotg_enqueue_setup(struct dwc2_hsotg *hsotg)
 	}
 
 	hsotg->eps[0].dir_in = 0;
+	hsotg->eps[0].sent_zlp = 0;
+	hsotg->ep0_state = DWC2_EP0_SETUP;
 
 	ret = s3c_hsotg_ep_queue(&hsotg->eps[0].ep, req, GFP_ATOMIC);
 	if (ret < 0) {
@@ -1256,6 +1246,25 @@ static void s3c_hsotg_enqueue_setup(struct dwc2_hsotg *hsotg)
 		 * driver fail.
 		 */
 	}
+}
+
+static void s3c_hsotg_program_zlp(struct dwc2_hsotg *hsotg,
+				  struct s3c_hsotg_ep *hs_ep)
+{
+	u8 index = hs_ep->index;
+	u32 epctl_reg = hs_ep->dir_in ? DIEPCTL(index) : DOEPCTL(index);
+	u32 epsiz_reg = hs_ep->dir_in ? DIEPTSIZ(index) : DOEPTSIZ(index);
+	u32 ctrl;
+
+	dev_dbg(hsotg->dev, "%s zero-length packet on ep%d\n",
+		 hs_ep->dir_in ? "Sending" : "Receiving", index);
+
+	writel(DXEPTSIZ_MC(1) | DXEPTSIZ_PKTCNT(1) |
+	       DXEPTSIZ_XFERSIZE(0), hsotg->regs + epsiz_reg);
+
+	ctrl = readl(hsotg->regs + epctl_reg);
+	ctrl |= DXEPCTL_CNAK | DXEPCTL_EPENA | DXEPCTL_USBACTEP;
+	writel(ctrl, hsotg->regs + epctl_reg);
 }
 
 /**
@@ -1389,72 +1398,41 @@ static void s3c_hsotg_rx_data(struct dwc2_hsotg *hsotg, int ep_idx, int size)
 	ioread32_rep(fifo, hs_req->req.buf + read_ptr, to_read);
 }
 
-/**
- * s3c_hsotg_send_zlp - send zero-length packet on control endpoint
- * @hsotg: The device instance
- * @req: The request currently on this endpoint
- *
- * Generate a zero-length IN packet request for terminating a SETUP
- * transaction.
- *
- * Note, since we don't write any data to the TxFIFO, then it is
- * currently believed that we do not need to wait for any space in
- * the TxFIFO.
- */
-static void s3c_hsotg_send_zlp(struct dwc2_hsotg *hsotg,
-			       struct s3c_hsotg_req *req)
+static void s3c_hsotg_ep0_zlp(struct dwc2_hsotg *hsotg, bool dir_in)
 {
-	u32 ctrl;
-
-	if (!req) {
-		dev_warn(hsotg->dev, "%s: no request?\n", __func__);
-		return;
-	}
-
-	if (req->req.length == 0) {
-		hsotg->eps[0].sent_zlp = 1;
-		s3c_hsotg_enqueue_setup(hsotg);
-		return;
-	}
-
-	hsotg->eps[0].dir_in = 1;
-	hsotg->eps[0].sent_zlp = 1;
-
-	dev_dbg(hsotg->dev, "sending zero-length packet\n");
-
-	/* issue a zero-sized packet to terminate this */
-	writel(DXEPTSIZ_MC(1) | DXEPTSIZ_PKTCNT(1) |
-	       DXEPTSIZ_XFERSIZE(0), hsotg->regs + DIEPTSIZ(0));
-
-	ctrl = readl(hsotg->regs + DIEPCTL0);
-	ctrl |= DXEPCTL_CNAK;  /* clear NAK set by core */
-	ctrl |= DXEPCTL_EPENA; /* ensure ep enabled */
-	ctrl |= DXEPCTL_USBACTEP;
-	writel(ctrl, hsotg->regs + DIEPCTL0);
+	hsotg->eps[0].dir_in = dir_in;
+	hsotg->ep0_state = dir_in ? DWC2_EP0_STATUS_IN :
+					DWC2_EP0_STATUS_OUT;
+	s3c_hsotg_program_zlp(hsotg, &hsotg->eps[0]);
 }
 
 /**
  * s3c_hsotg_handle_outdone - handle receiving OutDone/SetupDone from RXFIFO
  * @hsotg: The device instance
  * @epnum: The endpoint received from
- * @was_setup: Set if processing a SetupDone event.
- *
  * The RXFIFO has delivered an OutDone event, which means that the data
  * transfer for an OUT endpoint has been completed, either by a short
  * packet or by the finish of a transfer.
  */
-static void s3c_hsotg_handle_outdone(struct dwc2_hsotg *hsotg,
-				     int epnum, bool was_setup)
+static void s3c_hsotg_handle_outdone(struct dwc2_hsotg *hsotg, int epnum)
 {
 	u32 epsize = readl(hsotg->regs + DOEPTSIZ(epnum));
 	struct s3c_hsotg_ep *hs_ep = &hsotg->eps[epnum];
 	struct s3c_hsotg_req *hs_req = hs_ep->req;
-	struct usb_request *req = &hs_req->req;
+	struct usb_request *req;
 	unsigned size_left = DXEPTSIZ_XFERSIZE_GET(epsize);
 	int result = 0;
 
 	if (!hs_req) {
 		dev_dbg(hsotg->dev, "%s: no request active\n", __func__);
+		return;
+	}
+	req = &hs_req->req;
+
+	if (epnum == 0 && hsotg->ep0_state == DWC2_EP0_STATUS_OUT) {
+		dev_dbg(hsotg->dev, "zlp packet received\n");
+		s3c_hsotg_complete_request(hsotg, hs_ep, hs_req, 0);
+		s3c_hsotg_enqueue_setup(hsotg);
 		return;
 	}
 
@@ -1480,12 +1458,6 @@ static void s3c_hsotg_handle_outdone(struct dwc2_hsotg *hsotg,
 	if (req->actual < req->length && size_left == 0) {
 		s3c_hsotg_start_req(hsotg, hs_ep, hs_req, true);
 		return;
-	} else if (epnum == 0) {
-		/*
-		 * After was_setup = 1 =>
-		 * set CNAK for non Setup requests
-		 */
-		hsotg->setup = was_setup ? 0 : 1;
 	}
 
 	if (req->actual < req->length && req->short_not_ok) {
@@ -1498,13 +1470,10 @@ static void s3c_hsotg_handle_outdone(struct dwc2_hsotg *hsotg,
 		 */
 	}
 
-	if (epnum == 0) {
-		/*
-		 * Condition req->complete != s3c_hsotg_complete_setup says:
-		 * send ZLP when we have an asynchronous request from gadget
-		 */
-		if (!was_setup && req->complete != s3c_hsotg_complete_setup)
-			s3c_hsotg_send_zlp(hsotg, hs_req);
+	if (epnum == 0 && hsotg->ep0_state == DWC2_EP0_DATA_OUT) {
+		/* Move to STATUS IN. */
+		s3c_hsotg_ep0_zlp(hsotg, true);
+		return;
 	}
 
 	s3c_hsotg_complete_request(hsotg, hs_ep, hs_req, result);
@@ -1570,7 +1539,7 @@ static void s3c_hsotg_handle_rx(struct dwc2_hsotg *hsotg)
 			s3c_hsotg_read_frameno(hsotg));
 
 		if (!using_dma(hsotg))
-			s3c_hsotg_handle_outdone(hsotg, epnum, false);
+			s3c_hsotg_handle_outdone(hsotg, epnum);
 		break;
 
 	case GRXSTS_PKTSTS_SETUPDONE:
@@ -1579,7 +1548,8 @@ static void s3c_hsotg_handle_rx(struct dwc2_hsotg *hsotg)
 			s3c_hsotg_read_frameno(hsotg),
 			readl(hsotg->regs + DOEPCTL(0)));
 
-		s3c_hsotg_handle_outdone(hsotg, epnum, true);
+		if (hsotg->ep0_state == DWC2_EP0_SETUP)
+			s3c_hsotg_handle_outdone(hsotg, epnum);
 		break;
 
 	case GRXSTS_PKTSTS_OUTRX:
@@ -1591,6 +1561,8 @@ static void s3c_hsotg_handle_rx(struct dwc2_hsotg *hsotg)
 			"SetupRX (Frame=0x%08x, DOPEPCTL=0x%08x)\n",
 			s3c_hsotg_read_frameno(hsotg),
 			readl(hsotg->regs + DOEPCTL(0)));
+
+		WARN_ON(hsotg->ep0_state != DWC2_EP0_SETUP);
 
 		s3c_hsotg_rx_data(hsotg, epnum, size);
 		break;
@@ -1771,10 +1743,11 @@ static void s3c_hsotg_complete_in(struct dwc2_hsotg *hsotg,
 		return;
 	}
 
-	/* Finish ZLP handling for IN EP0 transactions */
-	if (hsotg->eps[0].sent_zlp) {
-		dev_dbg(hsotg->dev, "zlp packet received\n");
+	/* Finish the status IN stage of an EP0 transaction. */
+	if (hs_ep->index == 0 && hsotg->ep0_state == DWC2_EP0_STATUS_IN) {
+		dev_dbg(hsotg->dev, "zlp packet sent\n");
 		s3c_hsotg_complete_request(hsotg, hs_ep, hs_req, 0);
+		s3c_hsotg_enqueue_setup(hsotg);
 		return;
 	}
 
@@ -1801,31 +1774,25 @@ static void s3c_hsotg_complete_in(struct dwc2_hsotg *hsotg,
 	dev_dbg(hsotg->dev, "req->length:%d req->actual:%d req->zero:%d\n",
 		hs_req->req.length, hs_req->req.actual, hs_req->req.zero);
 
-	/*
-	 * Check if dealing with Maximum Packet Size(MPS) IN transfer at EP0
-	 * When sent data is a multiple MPS size (e.g. 64B ,128B ,192B
-	 * ,256B ... ), after last MPS sized packet send IN ZLP packet to
-	 * inform the host that no more data is available.
-	 * The state of req.zero member is checked to be sure that the value to
-	 * send is smaller than wValue expected from host.
-	 * Check req.length to NOT send another ZLP when the current one is
-	 * under completion (the one for which this completion has been called).
-	 */
-	if (hs_req->req.length && hs_ep->index == 0 && hs_req->req.zero &&
-	    hs_req->req.length == hs_req->req.actual &&
-	    !(hs_req->req.length % hs_ep->ep.maxpacket)) {
-
-		dev_dbg(hsotg->dev, "ep0 zlp IN packet sent\n");
-		s3c_hsotg_send_zlp(hsotg, hs_req);
-
-		return;
-	}
-
 	if (!size_left && hs_req->req.actual < hs_req->req.length) {
 		dev_dbg(hsotg->dev, "%s trying more for req...\n", __func__);
 		s3c_hsotg_start_req(hsotg, hs_ep, hs_req, true);
-	} else
-		s3c_hsotg_complete_request(hsotg, hs_ep, hs_req, 0);
+		return;
+	}
+
+	if (hs_ep->sent_zlp) {
+		s3c_hsotg_program_zlp(hsotg, hs_ep);
+		hs_ep->sent_zlp = 0;
+		return;
+	}
+
+	if (hs_ep->index == 0 && hsotg->ep0_state == DWC2_EP0_DATA_IN) {
+		/* Move to STATUS OUT. */
+		s3c_hsotg_ep0_zlp(hsotg, false);
+		return;
+	}
+
+	s3c_hsotg_complete_request(hsotg, hs_ep, hs_req, 0);
 }
 
 /**
@@ -1884,7 +1851,7 @@ static void s3c_hsotg_epint(struct dwc2_hsotg *hsotg, unsigned int idx,
 			 * as we ignore the RXFIFO.
 			 */
 
-			s3c_hsotg_handle_outdone(hsotg, idx, false);
+			s3c_hsotg_handle_outdone(hsotg, idx);
 		}
 	}
 
@@ -1923,7 +1890,7 @@ static void s3c_hsotg_epint(struct dwc2_hsotg *hsotg, unsigned int idx,
 			if (dir_in)
 				WARN_ON_ONCE(1);
 			else
-				s3c_hsotg_handle_outdone(hsotg, 0, true);
+				s3c_hsotg_handle_outdone(hsotg, 0);
 		}
 	}
 
@@ -2347,7 +2314,6 @@ irq_retry:
 		writel(GINTSTS_ENUMDONE, hsotg->regs + GINTSTS);
 
 		s3c_hsotg_irq_enumdone(hsotg);
-		hsotg->connected = 1;
 	}
 
 	if (gintsts & (GINTSTS_OEPINT | GINTSTS_IEPINT)) {
@@ -2382,6 +2348,9 @@ irq_retry:
 			readl(hsotg->regs + GNPTXSTS));
 
 		writel(GINTSTS_USBRST, hsotg->regs + GINTSTS);
+
+		/* Keep the gadget framework in sync across a bus-only reset. */
+		s3c_hsotg_disconnect(hsotg);
 
 		if (usb_status & GOTGCTL_BSESVLD) {
 			if (time_after(jiffies, hsotg->last_rst +
