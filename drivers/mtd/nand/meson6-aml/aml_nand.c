@@ -6408,6 +6408,73 @@ static struct class_attribute nand_class_attrs[] = {
     __ATTR_NULL
 };
 
+/*
+ * Linux 3.19's nand_scan_ident() uses chip->read_buf() while probing the
+ * device ID.  The legacy Amlogic driver used to allocate its coherent DMA
+ * buffers only after nand_scan(), so the first probe read dereferenced NULL.
+ * Keep a small bootstrap allocation until the NAND geometry is known, then
+ * replace it with buffers sized for the detected multi-chip/two-plane layout.
+ */
+#define AML_NAND_BOOTSTRAP_DATA_SIZE	4096
+#define AML_NAND_BOOTSTRAP_INFO_SIZE	PER_INFO_BYTE
+
+static void aml_nand_free_dma_buffers(struct aml_nand_chip *aml_chip)
+{
+	if (aml_chip->user_info_buf) {
+		dma_free_coherent(aml_chip->device,
+				  aml_chip->user_info_buf_size,
+				  aml_chip->user_info_buf,
+				  aml_chip->nand_info_dma_addr);
+		aml_chip->user_info_buf = NULL;
+		aml_chip->user_info_buf_size = 0;
+	}
+
+	if (aml_chip->aml_nand_data_buf) {
+		dma_free_coherent(aml_chip->device,
+				  aml_chip->aml_nand_data_buf_size,
+				  aml_chip->aml_nand_data_buf,
+				  aml_chip->data_dma_addr);
+		aml_chip->aml_nand_data_buf = NULL;
+		aml_chip->aml_nand_data_buf_size = 0;
+	}
+}
+
+static int aml_nand_alloc_dma_buffers(struct aml_nand_chip *aml_chip,
+				      size_t data_size, size_t info_size)
+{
+	unsigned char *data_buf;
+	unsigned int *info_buf;
+	dma_addr_t data_dma_addr;
+	dma_addr_t info_dma_addr;
+
+	data_buf = dma_alloc_coherent(aml_chip->device, data_size,
+				      &data_dma_addr, GFP_KERNEL);
+	if (!data_buf)
+		return -ENOMEM;
+
+	info_buf = dma_alloc_coherent(aml_chip->device, info_size,
+				      &info_dma_addr, GFP_KERNEL);
+	if (!info_buf) {
+		dma_free_coherent(aml_chip->device, data_size, data_buf,
+				  data_dma_addr);
+		return -ENOMEM;
+	}
+
+	aml_nand_free_dma_buffers(aml_chip);
+	aml_chip->aml_nand_data_buf = data_buf;
+	aml_chip->data_dma_addr = data_dma_addr;
+	aml_chip->aml_nand_data_buf_size = data_size;
+	aml_chip->user_info_buf = info_buf;
+	aml_chip->nand_info_dma_addr = info_dma_addr;
+	aml_chip->user_info_buf_size = info_size;
+
+	dev_info(aml_chip->device,
+		 "DMA buffers: data=%p/%pad size=%zu info=%p/%pad size=%zu\n",
+		 data_buf, &aml_chip->data_dma_addr, data_size,
+		 info_buf, &aml_chip->nand_info_dma_addr, info_size);
+	return 0;
+}
+
 int aml_nand_init(struct aml_nand_chip *aml_chip)
 {
 	struct aml_nand_platform *plat = aml_chip->platform;
@@ -6719,6 +6786,14 @@ int aml_nand_init(struct aml_nand_chip *aml_chip)
 	aml_chip->aml_nand_hw_init(aml_chip);
 	aml_chip->toggle_mode =0;
 
+	err = aml_nand_alloc_dma_buffers(aml_chip,
+					 AML_NAND_BOOTSTRAP_DATA_SIZE,
+					 AML_NAND_BOOTSTRAP_INFO_SIZE);
+	if (err) {
+		dev_err(aml_chip->device,
+			"failed to allocate bootstrap NAND DMA buffers\n");
+		goto exit_error;
+	}
 
 	if (nand_scan(mtd, aml_chip->chip_num) == -ENODEV) {
 		chip->options = 0;
@@ -6922,17 +6997,16 @@ int aml_nand_init(struct aml_nand_chip *aml_chip)
 	aml_chip->virtual_page_size = mtd->writesize;
 	aml_chip->virtual_block_size = mtd->erasesize;
 
-	aml_chip->aml_nand_data_buf = dma_alloc_coherent(aml_chip->device, (mtd->writesize + mtd->oobsize), &aml_chip->data_dma_addr, GFP_KERNEL);
-	if (aml_chip->aml_nand_data_buf == NULL) {
-		printk("no memory for flash data buf\n");
-		err = -ENOMEM;
-		goto exit_error;
-	}
-
-	aml_chip->user_info_buf = dma_alloc_coherent(aml_chip->device, (mtd->writesize / chip->ecc.size)*sizeof(int), &(aml_chip->nand_info_dma_addr), GFP_KERNEL);
-	if (aml_chip->user_info_buf == NULL) {
-		printk("no memory for flash info buf\n");
-		err = -ENOMEM;
+	err = aml_nand_alloc_dma_buffers(aml_chip,
+					 mtd->writesize + mtd->oobsize,
+					 DIV_ROUND_UP(mtd->writesize,
+						      chip->ecc.size ?
+						      chip->ecc.size :
+						      NAND_ECC_UNIT_SIZE) *
+					 PER_INFO_BYTE);
+	if (err) {
+		dev_err(aml_chip->device,
+			"failed to resize NAND DMA buffers for detected geometry\n");
 		goto exit_error;
 	}
 
@@ -7053,20 +7127,13 @@ int aml_nand_init(struct aml_nand_chip *aml_chip)
 
 exit_error:
 
-	if (aml_chip->user_info_buf) {
-		dma_free_coherent(aml_chip->device, (mtd->writesize / chip->ecc.size)*sizeof(int), aml_chip->user_info_buf, (dma_addr_t)aml_chip->nand_info_dma_addr);
-		aml_chip->user_info_buf = NULL;
-	}
+	aml_nand_free_dma_buffers(aml_chip);
 	if (chip->buffers) {
 		kfree(chip->buffers->databuf);
 		kfree(chip->buffers->ecccalc);
 		kfree(chip->buffers->ecccode);
 		kfree(chip->buffers);
 		chip->buffers = NULL;
-	}
-	if (aml_chip->aml_nand_data_buf) {
-		dma_free_coherent(aml_chip->device, (mtd->writesize + mtd->oobsize), aml_chip->aml_nand_data_buf, (dma_addr_t)aml_chip->data_dma_addr);
-		aml_chip->aml_nand_data_buf = NULL;
 	}
 	if (aml_chip->block_status) {
 		kfree(aml_chip->block_status);

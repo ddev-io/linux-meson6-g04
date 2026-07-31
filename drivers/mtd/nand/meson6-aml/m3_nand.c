@@ -639,6 +639,15 @@ static int m3_nand_dma_write(struct aml_nand_chip *aml_chip, unsigned char *buf,
 	struct nand_chip *chip = &aml_chip->chip;
     struct mtd_info *mtd = &aml_chip->mtd;
 
+	if (!aml_chip->aml_nand_data_buf || !aml_chip->user_info_buf ||
+	    len < 0 || len > aml_chip->aml_nand_data_buf_size) {
+		dev_err(aml_chip->device,
+			"invalid NAND DMA write buffers/length: data=%p info=%p len=%d data_size=%zu\n",
+			aml_chip->aml_nand_data_buf, aml_chip->user_info_buf,
+			len, aml_chip->aml_nand_data_buf_size);
+		return -EINVAL;
+	}
+
 	memcpy(aml_chip->aml_nand_data_buf, buf, len);
     smp_wmb();
 	wmb();
@@ -651,6 +660,12 @@ static int m3_nand_dma_write(struct aml_nand_chip *aml_chip, unsigned char *buf,
 	}
 	else
 		count = len/chip->ecc.size;
+	if (!count || count > aml_chip->user_info_buf_size / PER_INFO_BYTE) {
+		dev_err(aml_chip->device,
+			"invalid NAND DMA write info count: count=%u info_size=%zu\n",
+			count, aml_chip->user_info_buf_size);
+		return -EINVAL;
+	}
 #ifdef CONFIG_CLK81_DFS
     down(&aml_chip->nand_sem);
 #endif
@@ -692,6 +707,15 @@ static int m3_nand_dma_read(struct aml_nand_chip *aml_chip, unsigned char *buf, 
 	int ret = 0;
 	struct mtd_info *mtd = &aml_chip->mtd;
 
+	if (!aml_chip->aml_nand_data_buf || !aml_chip->user_info_buf ||
+	    len < 0 || len > aml_chip->aml_nand_data_buf_size) {
+		dev_err(aml_chip->device,
+			"invalid NAND DMA read buffers/length: data=%p info=%p len=%d data_size=%zu\n",
+			aml_chip->aml_nand_data_buf, aml_chip->user_info_buf,
+			len, aml_chip->aml_nand_data_buf_size);
+		return -EINVAL;
+	}
+
 	info_times_int_len = PER_INFO_BYTE/sizeof(unsigned int);
 	if (bch_mode == NAND_ECC_NONE)
 		count = 1;
@@ -701,6 +725,12 @@ static int m3_nand_dma_read(struct aml_nand_chip *aml_chip, unsigned char *buf, 
 	}
 	else
 		count = len/chip->ecc.size;
+	if (!count || count > aml_chip->user_info_buf_size / PER_INFO_BYTE) {
+		dev_err(aml_chip->device,
+			"invalid NAND DMA read info count: count=%u info_size=%zu\n",
+			count, aml_chip->user_info_buf_size);
+		return -EINVAL;
+	}
 
 	info_buf = (volatile unsigned *)&(aml_chip->user_info_buf[(count-1)*info_times_int_len]);
 	memset((unsigned char *)aml_chip->user_info_buf, 0, count*PER_INFO_BYTE);

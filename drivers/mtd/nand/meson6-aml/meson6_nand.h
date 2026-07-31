@@ -711,8 +711,10 @@ struct aml_nand_chip {
 	unsigned page_addr;
 	unsigned char *aml_nand_data_buf;
 	dma_addr_t data_dma_addr;
+	size_t aml_nand_data_buf_size;
 	unsigned int *user_info_buf;
 	dma_addr_t nand_info_dma_addr;
+	size_t user_info_buf_size;
 	int8_t *block_status;
 #ifdef CONFIG_CLK81_DFS
     struct semaphore nand_sem;
