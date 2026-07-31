@@ -311,6 +311,11 @@ static void m3_nand_hw_init(struct aml_nand_chip *aml_chip)
 	int sys_clk_rate, sys_time, start_cycle, end_cycle, bus_cycle, bus_timing, Tcycle, T_REA = DEFAULT_T_REA, T_RHOH = DEFAULT_T_RHOH;
 
 	sys_clk = clk_get_sys(NAND_SYS_CLK_NAME, NULL);
+	if (IS_ERR_OR_NULL(sys_clk)) {
+		pr_err("meson6-nand: %s clock is unavailable\n",
+		       NAND_SYS_CLK_NAME);
+		return;
+	}
 	sys_clk_rate = clk_get_rate(sys_clk);
 	sys_time = (10000 / (sys_clk_rate / 1000000));
 
@@ -350,6 +355,11 @@ static void m3_nand_adjust_timing(struct aml_nand_chip *aml_chip)
 		aml_chip->T_RHOH = 15;
 
 	sys_clk = clk_get_sys(NAND_SYS_CLK_NAME, NULL);
+	if (IS_ERR_OR_NULL(sys_clk)) {
+		pr_err("meson6-nand: %s clock is unavailable\n",
+		       NAND_SYS_CLK_NAME);
+		return;
+	}
 	sys_clk_rate = clk_get_rate(sys_clk);
 	sys_time = (10000 / (sys_clk_rate / 1000000));
 	start_cycle = (((NAND_CYCLE_DELAY + aml_chip->T_REA * 10) * 10) / sys_time);

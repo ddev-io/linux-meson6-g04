@@ -14,6 +14,8 @@
  */
 
 #include <linux/io.h>
+#include <linux/clk-provider.h>
+#include <linux/clkdev.h>
 #include <linux/of.h>
 #include <linux/of_platform.h>
 #include <asm/mach/arch.h>
@@ -23,6 +25,43 @@
 #define MESON6_WDT_TC		0x0
 #define MESON6_WDT_RESET	0x4
 #define MESON6_WDT_TC_EN	(1 << 22)
+
+#define MESON6_G04_CLK81_RATE	200000000UL
+
+/*
+ * The vendor Meson6 kernel exposes clk81 through its legacy clock tree.
+ * Mainline 3.19 has no Meson6 clock provider yet, but the legacy NAND
+ * driver still looks it up by name before it can initialise the flash.
+ * Register the measured G04 clock early enough for all platform probes.
+ */
+static int __init meson6_g04_clk81_init(void)
+{
+	struct clk *clk;
+	int ret;
+
+	if (!of_machine_is_compatible("ddev-io,meson6-g04"))
+		return 0;
+
+	clk = clk_register_fixed_rate(NULL, "clk81", NULL, CLK_IS_ROOT,
+				      MESON6_G04_CLK81_RATE);
+	if (IS_ERR(clk)) {
+		pr_err("meson6-g04: failed to register clk81: %ld\n",
+		       PTR_ERR(clk));
+		return PTR_ERR(clk);
+	}
+
+	ret = clk_register_clkdev(clk, NULL, "clk81");
+	if (ret) {
+		pr_err("meson6-g04: failed to publish clk81: %d\n", ret);
+		clk_unregister(clk);
+		return ret;
+	}
+
+	pr_info("meson6-g04: registered legacy clk81 at %lu Hz\n",
+		MESON6_G04_CLK81_RATE);
+	return 0;
+}
+arch_initcall(meson6_g04_clk81_init);
 
 static void __init meson_init_early(void)
 {

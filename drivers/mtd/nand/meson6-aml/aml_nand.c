@@ -1529,6 +1529,11 @@ static void aml_platform_hw_init(struct aml_nand_chip *aml_chip)
 #endif
 
 	sys_clk = clk_get_sys(NAND_SYS_CLK_NAME, NULL);
+	if (IS_ERR_OR_NULL(sys_clk)) {
+		pr_err("meson6-nand: %s clock is unavailable\n",
+		       NAND_SYS_CLK_NAME);
+		return;
+	}
 	sys_clk_rate = clk_get_rate(sys_clk);
 	sys_time = (10000 / (sys_clk_rate / 1000000));
 
@@ -1594,6 +1599,11 @@ static void aml_platform_adjust_timing(struct aml_nand_chip *aml_chip)
 
 	if (READ_CBUS_REG(HHI_MPEG_CLK_CNTL)&(1<<8)) {
 		sys_clk = clk_get_sys(NAND_SYS_CLK_NAME, NULL);
+		if (IS_ERR_OR_NULL(sys_clk)) {
+			pr_err("meson6-nand: %s clock is unavailable\n",
+			       NAND_SYS_CLK_NAME);
+			return;
+		}
 		sys_clk_rate = clk_get_rate(sys_clk);
 		time_mode = -1;
 	}
