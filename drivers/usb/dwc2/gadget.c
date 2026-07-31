@@ -166,11 +166,55 @@ static void s3c_hsotg_init_fifo(struct dwc2_hsotg *hsotg)
 	unsigned int ep;
 	unsigned int addr;
 	unsigned int size;
+	unsigned int max_ep;
+	unsigned int rx_size;
+	unsigned int nptx_size;
+	unsigned int tx_size;
 	int timeout;
 	u32 val;
 
-	/* set FIFO sizes to 2048/1024 */
+	/*
+	 * G04 has only 1984 words of dedicated SRAM.  The legacy 2048/1024
+	 * profile already exceeds that limit before endpoint FIFOs are added.
+	 * Keep the legacy profile for larger cores, but use a bounded profile
+	 * on small Meson6 cores so no FIFO is programmed outside SPRAM.
+	 */
+	if (hsotg->fifo_mem < 7168) {
+		rx_size = 256;
+		nptx_size = 256;
+		tx_size = 256;
+		max_ep = hsotg->num_of_eps;
+		if (max_ep > MAX_EPS_CHANNELS)
+			max_ep = MAX_EPS_CHANNELS;
 
+		writel(rx_size, hsotg->regs + GRXFSIZ);
+		writel((rx_size << FIFOSIZE_STARTADDR_SHIFT) |
+			(nptx_size << FIFOSIZE_DEPTH_SHIFT),
+			hsotg->regs + GNPTXFSIZ);
+		addr = rx_size + nptx_size;
+
+		dev_info(hsotg->dev,
+			 "Meson6 compact gadget FIFO: RX=%u NPTX=%u TX=%u "
+			 "total=%u/%u words, EPs=%u\n",
+			 rx_size, nptx_size, tx_size,
+			 addr + (max_ep > 0 ? (max_ep - 1) * tx_size : 0),
+			 hsotg->fifo_mem, max_ep);
+
+		for (ep = 1; ep < max_ep; ep++) {
+			if (addr + tx_size > hsotg->fifo_mem) {
+				dev_warn(hsotg->dev,
+					 "compact gadget FIFO exhausted at "
+					 "EP%u\n", ep);
+				break;
+			}
+			val = addr | (tx_size << FIFOSIZE_DEPTH_SHIFT);
+			addr += tx_size;
+			writel(val, hsotg->regs + DPTXFSIZN(ep));
+		}
+		goto flush_fifos;
+	}
+
+	/* set FIFO sizes to 2048/1024 */
 	writel(2048, hsotg->regs + GRXFSIZ);
 	writel((2048 << FIFOSIZE_STARTADDR_SHIFT) |
 		(1024 << FIFOSIZE_DEPTH_SHIFT), hsotg->regs + GNPTXFSIZ);
@@ -216,6 +260,7 @@ static void s3c_hsotg_init_fifo(struct dwc2_hsotg *hsotg)
 		writel(val, hsotg->regs + DPTXFSIZN(ep));
 	}
 
+flush_fifos:
 	/*
 	 * according to p428 of the design guide, we need to ensure that
 	 * all fifos are flushed before continuing
