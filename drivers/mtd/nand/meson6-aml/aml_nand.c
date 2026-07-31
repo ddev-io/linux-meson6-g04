@@ -6522,11 +6522,16 @@ static void aml_nand_update_ecc_strength(struct aml_nand_chip *aml_chip)
 	}
 
 	chip->ecc.strength = strength;
+	if (chip->ecc.size) {
+		chip->ecc.steps = mtd->writesize / chip->ecc.size;
+		chip->ecc.total = chip->ecc.steps * chip->ecc.bytes;
+	}
 	mtd->ecc_strength = strength;
 	mtd->ecc_step_size = chip->ecc.size;
 	mtd->bitflip_threshold = strength;
-	pr_info("Amlogic NAND ECC: bch=0x%x strength=%u step=%u\n",
-		aml_chip->bch_mode, strength, chip->ecc.size);
+	pr_info("Amlogic NAND ECC: bch=0x%x strength=%u step=%u "
+		"steps=%u total=%u\n", aml_chip->bch_mode, strength,
+		chip->ecc.size, chip->ecc.steps, chip->ecc.total);
 }
 
 int aml_nand_init(struct aml_nand_chip *aml_chip)
