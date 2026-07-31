@@ -68,6 +68,40 @@ static inline void __bic32(void __iomem *ptr, u32 val)
 /* forward decleration of functions */
 static void s3c_hsotg_dump(struct dwc2_hsotg *hsotg);
 
+/* Keep early USB diagnostics bounded so the RAM console retains boot logs. */
+struct g04_dwc2_diag_counters {
+	u8 reset;
+	u8 enumdone;
+	u8 rx;
+	u8 ep0_in;
+	u8 ep0_out;
+	u8 setup;
+	u8 enqueue;
+	u8 start;
+};
+
+static struct g04_dwc2_diag_counters g04_dwc2_diag;
+
+static void g04_dwc2_diag_regs(struct dwc2_hsotg *hsotg,
+				const char *event)
+{
+	dev_info(hsotg->dev,
+		 "G314 %s: GI=%08x/%08x DA=%08x/%08x "
+		 "EP0I=%08x/%08x/%08x EP0O=%08x/%08x/%08x state=%u\n",
+		 event, readl(hsotg->regs + GINTSTS),
+		 readl(hsotg->regs + GINTMSK), readl(hsotg->regs + DAINT),
+		 readl(hsotg->regs + DAINTMSK), readl(hsotg->regs + DIEPINT(0)),
+		 readl(hsotg->regs + DIEPCTL0), readl(hsotg->regs + DIEPTSIZ0),
+		 readl(hsotg->regs + DOEPINT(0)), readl(hsotg->regs + DOEPCTL0),
+		 readl(hsotg->regs + DOEPTSIZ0), hsotg->ep0_state);
+	dev_info(hsotg->dev,
+		 "G314 %s core: DCTL=%08x DCFG=%08x DSTS=%08x "
+		 "GOTGCTL=%08x GNPTXSTS=%08x\n",
+		 event, readl(hsotg->regs + DCTL), readl(hsotg->regs + DCFG),
+		 readl(hsotg->regs + DSTS), readl(hsotg->regs + GOTGCTL),
+		 readl(hsotg->regs + GNPTXSTS));
+}
+
 /**
  * using_dma - return the DMA status of the driver.
  * @hsotg: The driver state.
@@ -732,6 +766,14 @@ static void s3c_hsotg_start_req(struct dwc2_hsotg *hsotg,
 	dev_dbg(hsotg->dev, "%s: DXEPCTL=0x%08x\n",
 		__func__, readl(hsotg->regs + epctrl_reg));
 
+	if (index == 0 && g04_dwc2_diag.start++ < 8)
+		dev_info(hsotg->dev,
+			 "G314 start EP0 %s: len=%u packets=%u state=%u "
+			 "CTL=%08x SIZ=%08x req=%p\n",
+			 dir_in ? "IN" : "OUT", length, packets, hsotg->ep0_state,
+			 readl(hsotg->regs + epctrl_reg),
+			 readl(hsotg->regs + epsize_reg), hs_ep->req);
+
 	/* enable ep interrupts */
 	s3c_hsotg_ctrl_epint(hsotg, hs_ep->index, hs_ep->dir_in, 1);
 }
@@ -1125,6 +1167,12 @@ static void s3c_hsotg_process_control(struct dwc2_hsotg *hsotg,
 	dev_dbg(hsotg->dev, "ctrl Req=%02x, Type=%02x, V=%04x, L=%04x\n",
 		 ctrl->bRequest, ctrl->bRequestType,
 		 ctrl->wValue, ctrl->wLength);
+	if (g04_dwc2_diag.setup++ < 16)
+		dev_info(hsotg->dev,
+			 "G314 SETUP %02x %02x %04x %04x %04x state=%u\n",
+			 ctrl->bRequestType, ctrl->bRequest,
+			 le16_to_cpu(ctrl->wValue), le16_to_cpu(ctrl->wIndex),
+			 le16_to_cpu(ctrl->wLength), hsotg->ep0_state);
 
 	if (ctrl->wLength == 0) {
 		ep0->dir_in = 1;
@@ -1228,6 +1276,14 @@ static void s3c_hsotg_enqueue_setup(struct dwc2_hsotg *hsotg)
 	req->length = 8;
 	req->buf = hsotg->ctrl_buff;
 	req->complete = s3c_hsotg_complete_setup;
+
+	if (g04_dwc2_diag.enqueue++ < 8)
+		dev_info(hsotg->dev,
+			 "G314 enqueue EP0: queued=%u req=%p active=%p "
+			 "state=%u CTL=%08x SIZ=%08x\n",
+			 !list_empty(&hs_req->queue), hs_req, hsotg->eps[0].req,
+			 hsotg->ep0_state, readl(hsotg->regs + DOEPCTL0),
+			 readl(hsotg->regs + DOEPTSIZ0));
 
 	if (!list_empty(&hs_req->queue)) {
 		dev_dbg(hsotg->dev, "%s already queued???\n", __func__);
@@ -1515,6 +1571,7 @@ static u32 s3c_hsotg_read_frameno(struct dwc2_hsotg *hsotg)
 static void s3c_hsotg_handle_rx(struct dwc2_hsotg *hsotg)
 {
 	u32 grxstsr = readl(hsotg->regs + GRXSTSP);
+	u32 pktsts;
 	u32 epnum, status, size;
 
 	WARN_ON(using_dma(hsotg));
@@ -1524,6 +1581,16 @@ static void s3c_hsotg_handle_rx(struct dwc2_hsotg *hsotg)
 
 	size = grxstsr & GRXSTS_BYTECNT_MASK;
 	size >>= GRXSTS_BYTECNT_SHIFT;
+
+	pktsts = (status & GRXSTS_PKTSTS_MASK) >> GRXSTS_PKTSTS_SHIFT;
+	if (g04_dwc2_diag.rx++ < 32)
+		dev_info(hsotg->dev,
+			 "G314 RX: GRXSTSP=%08x ep=%u sts=%u size=%u "
+			 "state=%u DOEPINT0=%08x DOEPCTL0=%08x DOEPTSIZ0=%08x\n",
+			 grxstsr, epnum, pktsts, size, hsotg->ep0_state,
+			 readl(hsotg->regs + DOEPINT(0)),
+			 readl(hsotg->regs + DOEPCTL0),
+			 readl(hsotg->regs + DOEPTSIZ0));
 
 	if (1)
 		dev_dbg(hsotg->dev, "%s: GRXSTSP=0x%08x (%d@%d)\n",
@@ -1565,6 +1632,16 @@ static void s3c_hsotg_handle_rx(struct dwc2_hsotg *hsotg)
 		WARN_ON(hsotg->ep0_state != DWC2_EP0_SETUP);
 
 		s3c_hsotg_rx_data(hsotg, epnum, size);
+		if (size == sizeof(struct usb_ctrlrequest) && epnum == 0 &&
+		    g04_dwc2_diag.setup < 16) {
+			struct usb_ctrlrequest *ctrl = (void *)hsotg->ctrl_buff;
+
+			dev_info(hsotg->dev,
+				 "G314 SETUPRX data: %02x %02x %04x %04x %04x\n",
+				 ctrl->bRequestType, ctrl->bRequest,
+				 le16_to_cpu(ctrl->wValue), le16_to_cpu(ctrl->wIndex),
+				 le16_to_cpu(ctrl->wLength));
+		}
 		break;
 
 	default:
@@ -1819,6 +1896,17 @@ static void s3c_hsotg_epint(struct dwc2_hsotg *hsotg, unsigned int idx,
 	/* Clear endpoint interrupts */
 	writel(ints, hsotg->regs + epint_reg);
 
+	if (idx == 0 && ((!dir_in && g04_dwc2_diag.ep0_out++ < 32) ||
+			 (dir_in && g04_dwc2_diag.ep0_in++ < 32)))
+		dev_info(hsotg->dev,
+			 "G314 EP0 %s IRQ=%08x CTL=%08x SIZ=%08x "
+			 "DAINT=%08x/%08x state=%u req=%p\n",
+			 dir_in ? "IN" : "OUT", ints, ctrl,
+			 readl(hsotg->regs + epsiz_reg),
+			 readl(hsotg->regs + DAINT),
+			 readl(hsotg->regs + DAINTMSK), hsotg->ep0_state,
+			 hs_ep->req);
+
 	dev_dbg(hsotg->dev, "%s: ep%d(%s) DxEPINT=0x%08x\n",
 		__func__, idx, dir_in ? "in" : "out", ints);
 
@@ -1973,6 +2061,8 @@ static void s3c_hsotg_irq_enumdone(struct dwc2_hsotg *hsotg)
 	}
 	dev_info(hsotg->dev, "new device is %s\n",
 		 usb_speed_string(hsotg->gadget.speed));
+	if (g04_dwc2_diag.enumdone++ < 8)
+		g04_dwc2_diag_regs(hsotg, "ENUMDONE before EP0");
 
 	/*
 	 * we should now know the maximum packet size for an
@@ -1993,6 +2083,8 @@ static void s3c_hsotg_irq_enumdone(struct dwc2_hsotg *hsotg)
 	dev_dbg(hsotg->dev, "EP0: DIEPCTL0=0x%08x, DOEPCTL0=0x%08x\n",
 		readl(hsotg->regs + DIEPCTL0),
 		readl(hsotg->regs + DOEPCTL0));
+	if (g04_dwc2_diag.enumdone <= 8)
+		g04_dwc2_diag_regs(hsotg, "ENUMDONE after EP0");
 }
 
 /**
@@ -2343,6 +2435,9 @@ irq_retry:
 
 		u32 usb_status = readl(hsotg->regs + GOTGCTL);
 
+		if (g04_dwc2_diag.reset++ < 8)
+			g04_dwc2_diag_regs(hsotg, "USBRST before reinit");
+
 		dev_dbg(hsotg->dev, "%s: USBRst\n", __func__);
 		dev_dbg(hsotg->dev, "GNPTXSTS=%08x\n",
 			readl(hsotg->regs + GNPTXSTS));
@@ -2362,6 +2457,8 @@ irq_retry:
 				s3c_hsotg_core_init_disconnected(hsotg, true);
 			}
 		}
+		if (g04_dwc2_diag.reset <= 8)
+			g04_dwc2_diag_regs(hsotg, "USBRST after reinit");
 	}
 
 	/* check both FIFOs */
