@@ -6475,6 +6475,60 @@ static int aml_nand_alloc_dma_buffers(struct aml_nand_chip *aml_chip,
 	return 0;
 }
 
+/* Linux 3.19 validates hardware-ECC strength during nand_scan_tail(). */
+static void aml_nand_update_ecc_strength(struct aml_nand_chip *aml_chip)
+{
+	struct nand_chip *chip = &aml_chip->chip;
+	struct mtd_info *mtd = &aml_chip->mtd;
+	unsigned int strength = 1;
+
+	if (chip->ecc.mode == NAND_ECC_NONE) {
+		chip->ecc.strength = 0;
+		return;
+	}
+
+	switch (aml_chip->bch_mode) {
+	case NAND_ECC_BCH8:
+	case NAND_ECC_BCH8_1K:
+		strength = 8;
+		break;
+	case NAND_ECC_BCH9:
+		strength = 9;
+		break;
+	case NAND_ECC_BCH12:
+		strength = 12;
+		break;
+	case NAND_ECC_BCH16:
+	case NAND_ECC_BCH16_1K:
+		strength = 16;
+		break;
+	case NAND_ECC_BCH24_1K:
+		strength = 24;
+		break;
+	case NAND_ECC_BCH30_1K:
+		strength = 30;
+		break;
+	case NAND_ECC_BCH40_1K:
+		strength = 40;
+		break;
+	case NAND_ECC_BCH60_1K:
+	case NAND_ECC_BCH_SHORT:
+		strength = 60;
+		break;
+	default:
+		if (chip->ecc.mode == NAND_ECC_SOFT)
+			strength = 1;
+		break;
+	}
+
+	chip->ecc.strength = strength;
+	mtd->ecc_strength = strength;
+	mtd->ecc_step_size = chip->ecc.size;
+	mtd->bitflip_threshold = strength;
+	pr_info("Amlogic NAND ECC: bch=0x%x strength=%u step=%u\n",
+		aml_chip->bch_mode, strength, chip->ecc.size);
+}
+
 int aml_nand_init(struct aml_nand_chip *aml_chip)
 {
 	struct aml_nand_platform *plat = aml_chip->platform;
@@ -6795,6 +6849,14 @@ int aml_nand_init(struct aml_nand_chip *aml_chip)
 		goto exit_error;
 	}
 
+	/* nand_scan_tail() checks this before the legacy options callback. */
+	if (chip->ecc.mode == NAND_ECC_HW ||
+	    chip->ecc.mode == NAND_ECC_HW_SYNDROME ||
+	    chip->ecc.mode == NAND_ECC_HW_OOB_FIRST) {
+		chip->ecc.strength = 1;
+		pr_info("Amlogic NAND ECC: bootstrap strength=1 before nand_scan\n");
+	}
+
 	if (nand_scan(mtd, aml_chip->chip_num) == -ENODEV) {
 		chip->options = 0;
 		chip->options |=  NAND_SKIP_BBTSCAN;
@@ -6878,6 +6940,7 @@ int aml_nand_init(struct aml_nand_chip *aml_chip)
 			goto exit_error;
 		}
 	}
+	aml_nand_update_ecc_strength(aml_chip);
 	mtd->writebufsize = mtd->writesize;
 #if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON3
 	switch(aml_chip->bch_mode){
