@@ -7078,21 +7078,17 @@ int aml_nand_init(struct aml_nand_chip *aml_chip)
 		goto exit_error;
 	}
 
-	if (chip->buffers) {
-		kfree(chip->buffers->databuf);
-		kfree(chip->buffers->ecccalc);
-		kfree(chip->buffers->ecccode);
-		kfree(chip->buffers);
+	/*
+	 * nand_scan_tail() allocates struct nand_buffers and its three data
+	 * areas as one contiguous object.  Keep that core-owned allocation:
+	 * the legacy driver used to kfree the interior pointers separately,
+	 * which is invalid with the Linux 3.19 NAND core.
+	 */
+	if (!chip->buffers || !chip->buffers->databuf) {
+		err = -ENOMEM;
+		goto exit_error;
 	}
-	chip->buffers = kzalloc(sizeof(*chip->buffers), GFP_KERNEL);
-	if (!chip->buffers) { err = -ENOMEM; goto exit_error; }
-	chip->buffers->databuf = kzalloc(mtd->writesize + mtd->oobsize, GFP_KERNEL);
-	chip->buffers->ecccalc = kzalloc(mtd->oobsize, GFP_KERNEL);
-	chip->buffers->ecccode = kzalloc(mtd->oobsize, GFP_KERNEL);
-	if (!chip->buffers->databuf || !chip->buffers->ecccalc ||
-	    !chip->buffers->ecccode) { err = -ENOMEM; goto exit_error; }
 	chip->oob_poi = chip->buffers->databuf + mtd->writesize;
-	chip->options |= NAND_OWN_BUFFERS;
 #ifdef NEW_NAND_SUPPORT
 	if((aml_chip->new_nand_info.type) && (aml_chip->new_nand_info.type < 10)){
 		if(aml_chip->new_nand_info.slc_program_info.get_default_value)
@@ -7196,10 +7192,7 @@ int aml_nand_init(struct aml_nand_chip *aml_chip)
 exit_error:
 
 	aml_nand_free_dma_buffers(aml_chip);
-	if (chip->buffers) {
-		kfree(chip->buffers->databuf);
-		kfree(chip->buffers->ecccalc);
-		kfree(chip->buffers->ecccode);
+	if (chip->buffers && !(chip->options & NAND_OWN_BUFFERS)) {
 		kfree(chip->buffers);
 		chip->buffers = NULL;
 	}
