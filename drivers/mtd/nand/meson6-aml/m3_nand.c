@@ -254,7 +254,9 @@ void aml_pinmux_set(const char *name)
 
 static void m3_nand_select_chip(struct aml_nand_chip *aml_chip, int chipnr)
 {
-//	int i;
+	unsigned int ce_mask = 0;
+	unsigned int rb_mask = 0;
+	int i;
 	//struct device *nand_dev = aml_chip->device ;
 	switch (chipnr) {
 		case 0:
@@ -265,35 +267,34 @@ static void m3_nand_select_chip(struct aml_nand_chip *aml_chip, int chipnr)
 			udelay(10);
 			aml_chip->chip_selected = aml_chip->chip_enable[chipnr];
 			aml_chip->rb_received = aml_chip->rb_enable[chipnr];
-#if 0
-			for (i=0; i<aml_chip->chip_num; i++) {
 
-				if (aml_chip->valid_chip[i]) {
-					if (!((aml_chip->chip_enable[i] >> 10) & 1))
-						aml_pinmux_set(nand_dev,&nand_ce0);
+			/*
+			 * Restore the factory Meson6 NAND pinmux directly.  The legacy
+			 * pinmux_set API is not available in this DT port, and the global
+			 * NAND mux setup selects CE0 plus bit 26 rather than CE1 (bit 24).
+			 */
+			for (i = 0; i < aml_chip->chip_num; i++) {
+				if (!aml_chip->valid_chip[i])
+					continue;
 
+				if (!((aml_chip->chip_enable[i] >> 10) & 1))
+					ce_mask |= BIT(25); /* CE0 */
+				if (!((aml_chip->chip_enable[i] >> 10) & 2))
+					ce_mask |= BIT(24); /* CE1 */
 
-					if (!((aml_chip->chip_enable[i] >> 10) & 2))
-						aml_pinmux_set(nand_dev,&nand_ce1);
-						#if 0
-					if (!((aml_chip->chip_enable[i] >> 10) & 4))
-						//pinmux_set(&nand_ce2);
-						;
-					if (!((aml_chip->chip_enable[i] >> 10) & 8))
-						//pinmux_set(&nand_ce3);
-						;
-					#endif
-					if (((aml_chip->ops_mode & AML_CHIP_NONE_RB) == 0) && (aml_chip->rb_enable[i])){
-						if (!((aml_chip->rb_enable[i] >> 10) & 1))
-							aml_pinmux_set(nand_dev,&nand_rb0);
-
-						if (!((aml_chip->rb_enable[i] >> 10) & 2))
-							aml_pinmux_set(nand_dev,&nand_rb1);
-
-					}
+				if (!(aml_chip->ops_mode & AML_CHIP_NONE_RB) &&
+				    aml_chip->rb_enable[i]) {
+					if (!((aml_chip->rb_enable[i] >> 10) & 1))
+						rb_mask |= BIT(17); /* RB0 */
+					if (!((aml_chip->rb_enable[i] >> 10) & 2))
+						rb_mask |= BIT(16); /* RB1 */
 				}
 			}
-#endif
+			if (ce_mask || rb_mask)
+				SET_CBUS_REG_MASK(0x202e, ce_mask | rb_mask);
+			if (ce_mask & BIT(24))
+				pr_info_once("G330 NAND pinmux: CE=0x%08x RB=0x%08x mux2=0x%08x\n",
+					     ce_mask, rb_mask, READ_CBUS_REG(0x202e));
 			NFC_SEND_CMD_IDLE(aml_chip->chip_selected, 0);
 
 			break;

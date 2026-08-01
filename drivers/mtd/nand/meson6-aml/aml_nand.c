@@ -3919,7 +3919,7 @@ static struct aml_nand_flash_dev *aml_nand_get_flash_type(struct mtd_info *mtd,
 		dev_id[i] = chip->read_byte(mtd);
 	}
 	*maf_id = dev_id[0];
-	pr_info("G329 NAND CE0 ID: %02x %02x %02x %02x %02x %02x\n",
+	pr_info("G330 NAND CE0 ID: %02x %02x %02x %02x %02x %02x\n",
 		dev_id[0], dev_id[1], dev_id[2], dev_id[3], dev_id[4],
 		dev_id[5]);
 
@@ -5192,7 +5192,7 @@ static int aml_nand_scan_ident(struct mtd_info *mtd, int maxchips)
 		chip->cmdfunc(mtd, NAND_CMD_READID, 0x00, -1);
 		for (j = 0; j < MAX_ID_LEN; j++)
 			ce_id[j] = chip->read_byte(mtd);
-		pr_info("G329 NAND CE%d ID: %02x %02x %02x %02x %02x %02x\n",
+		pr_info("G330 NAND CE%d ID: %02x %02x %02x %02x %02x %02x\n",
 			i, ce_id[0], ce_id[1], ce_id[2], ce_id[3], ce_id[4],
 			ce_id[5]);
 
@@ -5202,7 +5202,7 @@ static int aml_nand_scan_ident(struct mtd_info *mtd, int maxchips)
 		else
 			valid_chip_num ++;
 	}
-	pr_info("G329 NAND detected chips: %d of %d configured\n",
+	pr_info("G330 NAND detected chips: %d of %d configured\n",
 		valid_chip_num, maxchips);
 	if (i > 1) {
 		/*if ((aml_chip->valid_chip[1] == 0) && (aml_chip->valid_chip[2] == 1)) {
@@ -6923,7 +6923,7 @@ int aml_nand_init(struct aml_nand_chip *aml_chip)
 	    chip->ecc.mode == NAND_ECC_HW_SYNDROME ||
 	    chip->ecc.mode == NAND_ECC_HW_OOB_FIRST) {
 		chip->ecc.strength = 1;
-		pr_info("G329 NAND ECC: bootstrap strength=1 before ident\n");
+		pr_info("G330 NAND ECC: bootstrap strength=1 before ident\n");
 	}
 
 	/*
@@ -6942,11 +6942,11 @@ int aml_nand_init(struct aml_nand_chip *aml_chip)
 		board_valid_chip[i] = aml_chip->valid_chip[i];
 
 	chip->cmdfunc = aml_nand_ident_command;
-	pr_info("G329 NAND ident: factory single-column command handler active\n");
+	pr_info("G330 NAND ident: factory single-column command handler active\n");
 	err = nand_scan_ident(mtd, 1, NULL);
 	if (err) {
 		dev_err(aml_chip->device,
-			"G329 NAND generic ident bootstrap failed: %d\n", err);
+			"G330 NAND generic ident bootstrap failed: %d\n", err);
 		goto exit_error;
 	}
 
@@ -6960,10 +6960,10 @@ int aml_nand_init(struct aml_nand_chip *aml_chip)
 	err = aml_nand_scan_ident(mtd, aml_chip->chip_num);
 	if (err) {
 		dev_err(aml_chip->device,
-			"G329 NAND vendor ident failed: %d\n", err);
+			"G330 NAND vendor ident failed: %d\n", err);
 		goto exit_error;
 	}
-	pr_info("G329 NAND valid chips: [%u %u %u %u]\n",
+	pr_info("G330 NAND valid chips: [%u %u %u %u]\n",
 		aml_chip->valid_chip[0], aml_chip->valid_chip[1],
 		aml_chip->valid_chip[2], aml_chip->valid_chip[3]);
 
@@ -7025,18 +7025,18 @@ int aml_nand_init(struct aml_nand_chip *aml_chip)
 		}
 	}
 	aml_nand_update_ecc_strength(aml_chip);
-	pr_info("G329 NAND geometry: physical page=%u erase=%u oob=%u "
+	pr_info("G330 NAND geometry: physical page=%u erase=%u oob=%u "
 		"virtual page=%u erase=%u oob=%u size=%llu\n",
 		aml_chip->page_size, aml_chip->block_size, aml_chip->oob_size,
 		mtd->writesize, mtd->erasesize, mtd->oobsize,
 		(unsigned long long)mtd->size);
-	pr_info("G329 NAND addressing: page_shift=%u phys_erase_shift=%u "
+	pr_info("G330 NAND addressing: page_shift=%u phys_erase_shift=%u "
 		"chip_shift=%u pagemask=0x%x planes=%u configured_chips=%u "
 		"detected_chips=%u internal=%u\n",
 		chip->page_shift, chip->phys_erase_shift, chip->chip_shift,
 		chip->pagemask, aml_chip->plane_num, aml_chip->chip_num,
 		valid_chip_num, aml_chip->internal_chipnr);
-	pr_info("G329 NAND ECC: bch=0x%x strength=%u step=%u bytes=%u "
+	pr_info("G330 NAND ECC: bch=0x%x strength=%u step=%u bytes=%u "
 		"ops=0x%x options=0x%x\n", aml_chip->bch_mode,
 		chip->ecc.strength, chip->ecc.size, chip->ecc.bytes,
 		aml_chip->ops_mode, aml_chip->options);
@@ -7160,7 +7160,7 @@ int aml_nand_init(struct aml_nand_chip *aml_chip)
 	err = nand_scan_tail(mtd);
 	if (err) {
 		dev_err(aml_chip->device,
-			"G329 NAND scan tail failed: %d\n", err);
+			"G330 NAND scan tail failed: %d\n", err);
 		goto exit_error;
 	}
 	mtd->_suspend = aml_nand_suspend;

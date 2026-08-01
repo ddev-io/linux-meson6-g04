@@ -641,7 +641,7 @@ static void aml_nftl_add_mtd(struct mtd_blktrans_ops *tr, struct mtd_info *mtd)
 	struct aml_nftl_blk_t *aml_nftl_blk;
 	int error;
 
-	pr_info("G329 NFTL add_mtd: name=%s type=%u flags=0x%x "
+	pr_info("G330 NFTL add_mtd: name=%s type=%u flags=0x%x "
 		"size=%llu erase=%u write=%u oob=%u\n", mtd->name,
 		mtd->type, mtd->flags, (unsigned long long)mtd->size,
 		mtd->erasesize, mtd->writesize, mtd->oobavail);
@@ -653,11 +653,11 @@ static void aml_nftl_add_mtd(struct mtd_blktrans_ops *tr, struct mtd_info *mtd)
 	if (strcmp(mtd->name, "NFTL_Part"))
 		return;
 	/*
-	 * G329 validates only physical NAND identification and geometry.  Do not
+	 * G330 validates only physical NAND identification and geometry.  Do not
 	 * scan NFTL metadata or register a block device until both chip-enables
 	 * have been confirmed on hardware.
 	 */
-	pr_info("G329 NFTL registration intentionally skipped for %s\n",
+	pr_info("G330 NFTL registration intentionally skipped for %s\n",
 		mtd->name);
 	return;
 
