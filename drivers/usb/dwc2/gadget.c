@@ -91,7 +91,7 @@ static void g04_dwc2_diag_regs(struct dwc2_hsotg *hsotg,
 				const char *event)
 {
 	dev_info(hsotg->dev,
-		 "G321 %s: GI=%08x/%08x DA=%08x/%08x "
+		 "G322 %s: GI=%08x/%08x DA=%08x/%08x "
 		 "EP0I=%08x/%08x/%08x EP0O=%08x/%08x/%08x state=%u\n",
 		 event, readl(hsotg->regs + GINTSTS),
 		 readl(hsotg->regs + GINTMSK), readl(hsotg->regs + DAINT),
@@ -100,13 +100,13 @@ static void g04_dwc2_diag_regs(struct dwc2_hsotg *hsotg,
 		 readl(hsotg->regs + DOEPINT(0)), readl(hsotg->regs + DOEPCTL0),
 		 readl(hsotg->regs + DOEPTSIZ0), hsotg->ep0_state);
 	dev_info(hsotg->dev,
-		 "G321 %s core: DCTL=%08x DCFG=%08x DSTS=%08x "
+		 "G322 %s core: DCTL=%08x DCFG=%08x DSTS=%08x "
 		 "GOTGCTL=%08x GNPTXSTS=%08x\n",
 		 event, readl(hsotg->regs + DCTL), readl(hsotg->regs + DCFG),
 		 readl(hsotg->regs + DSTS), readl(hsotg->regs + GOTGCTL),
 		 readl(hsotg->regs + GNPTXSTS));
 	dev_info(hsotg->dev,
-		 "G321 %s hw: AHB=%08x USB=%08x RX=%08x NPTX=%08x "
+		 "G322 %s hw: AHB=%08x USB=%08x RX=%08x NPTX=%08x "
 		 "IM=%08x/%08x SNPS=%08x HW=%08x/%08x/%08x DMA0=%08x\n",
 		 event, readl(hsotg->regs + GAHBCFG),
 		 readl(hsotg->regs + GUSBCFG), readl(hsotg->regs + GRXFSIZ),
@@ -729,7 +729,7 @@ static void s3c_hsotg_start_req(struct dwc2_hsotg *hsotg,
 	    (ctrl & DXEPCTL_EPENA))
 		if (g04_dwc2_diag.ep0_active++ < 8)
 			dev_warn(hsotg->dev,
-				 "G321 EP0 SETUP unexpectedly active before arm: "
+				 "G322 EP0 SETUP unexpectedly active before arm: "
 				 "CTL=%08x SIZ=%08x DMA=%08x INT=%08x\n", ctrl,
 				 readl(hsotg->regs + DOEPTSIZ0),
 				 readl(hsotg->regs + DOEPDMA(0)),
@@ -750,7 +750,7 @@ static void s3c_hsotg_start_req(struct dwc2_hsotg *hsotg,
 		writel(ureq->dma, hsotg->regs + dma_reg);
 		if (index == 0 && g04_dwc2_diag.dma_map++ < 16)
 			dev_info(hsotg->dev,
-				 "G321 DMA EP0 %s: buf=%p dma=%pad len=%u "
+				 "G322 DMA EP0 %s: buf=%p dma=%pad len=%u "
 				 "reg=%08x\n", dir_in ? "IN" : "OUT",
 				 ureq->buf, &ureq->dma, length,
 				 readl(hsotg->regs + dma_reg));
@@ -821,7 +821,7 @@ static void s3c_hsotg_start_req(struct dwc2_hsotg *hsotg,
 
 	if (index == 0 && g04_dwc2_diag.start++ < 8)
 		dev_info(hsotg->dev,
-			 "G321 start EP0 %s: len=%u packets=%u state=%u "
+			 "G322 start EP0 %s: len=%u packets=%u state=%u "
 			 "CTL=%08x SIZ=%08x req=%p\n",
 			 dir_in ? "IN" : "OUT", length, packets, hsotg->ep0_state,
 			 readl(hsotg->regs + epctrl_reg),
@@ -892,7 +892,7 @@ static int s3c_hsotg_handle_unaligned_buf_start(struct dwc2_hsotg *hsotg,
 
 	if (g04_dwc2_diag.dma_bounce++ < 8)
 		dev_info(hsotg->dev,
-			 "G321 DMA bounce %s: %p -> %p len=%u\n",
+			 "G322 DMA bounce %s: %p -> %p len=%u\n",
 			 hs_ep->ep.name, req_buf, hs_req->req.buf,
 			 hs_req->req.length);
 	return 0;
@@ -1281,7 +1281,7 @@ static void s3c_hsotg_process_control(struct dwc2_hsotg *hsotg,
 		 ctrl->wValue, ctrl->wLength);
 	if (g04_dwc2_diag.setup++ < 16)
 		dev_info(hsotg->dev,
-			 "G321 SETUP %02x %02x %04x %04x %04x state=%u\n",
+			 "G322 SETUP %02x %02x %04x %04x %04x state=%u\n",
 			 ctrl->bRequestType, ctrl->bRequest,
 			 le16_to_cpu(ctrl->wValue), le16_to_cpu(ctrl->wIndex),
 			 le16_to_cpu(ctrl->wLength), hsotg->ep0_state);
@@ -1391,7 +1391,7 @@ static void s3c_hsotg_enqueue_setup(struct dwc2_hsotg *hsotg)
 
 	if (g04_dwc2_diag.enqueue++ < 8)
 		dev_info(hsotg->dev,
-			 "G321 enqueue EP0: queued=%u req=%p active=%p "
+			 "G322 enqueue EP0: queued=%u req=%p active=%p "
 			 "state=%u CTL=%08x SIZ=%08x\n",
 			 !list_empty(&hs_req->queue), hs_req, hsotg->eps[0].req,
 			 hsotg->ep0_state, readl(hsotg->regs + DOEPCTL0),
@@ -1698,7 +1698,7 @@ static void s3c_hsotg_handle_rx(struct dwc2_hsotg *hsotg)
 	pktsts = (status & GRXSTS_PKTSTS_MASK) >> GRXSTS_PKTSTS_SHIFT;
 	if (g04_dwc2_diag.rx++ < 32)
 		dev_info(hsotg->dev,
-			 "G321 RX: GRXSTSP=%08x ep=%u sts=%u size=%u "
+			 "G322 RX: GRXSTSP=%08x ep=%u sts=%u size=%u "
 			 "state=%u DOEPINT0=%08x DOEPCTL0=%08x DOEPTSIZ0=%08x\n",
 			 grxstsr, epnum, pktsts, size, hsotg->ep0_state,
 			 readl(hsotg->regs + DOEPINT(0)),
@@ -1750,7 +1750,7 @@ static void s3c_hsotg_handle_rx(struct dwc2_hsotg *hsotg)
 			struct usb_ctrlrequest *ctrl = (void *)hsotg->ctrl_buff;
 
 			dev_info(hsotg->dev,
-				 "G321 SETUPRX data: %02x %02x %04x %04x %04x\n",
+				 "G322 SETUPRX data: %02x %02x %04x %04x %04x\n",
 				 ctrl->bRequestType, ctrl->bRequest,
 				 le16_to_cpu(ctrl->wValue), le16_to_cpu(ctrl->wIndex),
 				 le16_to_cpu(ctrl->wLength));
@@ -2012,7 +2012,7 @@ static void s3c_hsotg_epint(struct dwc2_hsotg *hsotg, unsigned int idx,
 	if (idx == 0 && ((!dir_in && g04_dwc2_diag.ep0_out++ < 32) ||
 			 (dir_in && g04_dwc2_diag.ep0_in++ < 32)))
 		dev_info(hsotg->dev,
-			 "G321 EP0 %s IRQ=%08x CTL=%08x SIZ=%08x "
+			 "G322 EP0 %s IRQ=%08x CTL=%08x SIZ=%08x "
 			 "DAINT=%08x/%08x state=%u req=%p\n",
 			 dir_in ? "IN" : "OUT", ints, ctrl,
 			 readl(hsotg->regs + epsiz_reg),
@@ -2077,7 +2077,7 @@ static void s3c_hsotg_epint(struct dwc2_hsotg *hsotg, unsigned int idx,
 	if (ints & DXEPINT_AHBERR) {
 		if (g04_dwc2_diag.ahberr++ < 16)
 			dev_err(hsotg->dev,
-			"G321 AHBErr ep%u %s: INT=%08x CTL=%08x SIZ=%08x "
+			"G322 AHBErr ep%u %s: INT=%08x CTL=%08x SIZ=%08x "
 			"DMA=%08x AHB=%08x\n", idx, dir_in ? "IN" : "OUT",
 			ints, ctrl, readl(hsotg->regs + epsiz_reg),
 			readl(hsotg->regs +
@@ -2465,7 +2465,7 @@ void s3c_hsotg_core_init_disconnected(struct dwc2_hsotg *hsotg,
 	 */
 	if (g04_dwc2_diag.ep0_arm++ < 8)
 		dev_info(hsotg->dev,
-			 "G321 EP0 arm before queue: CTL=%08x SIZ=%08x "
+			 "G322 EP0 arm before queue: CTL=%08x SIZ=%08x "
 			 "DMA=%08x INT=%08x active=%p\n",
 			 readl(hsotg->regs + DOEPCTL0),
 			 readl(hsotg->regs + DOEPTSIZ0),
@@ -2476,7 +2476,7 @@ void s3c_hsotg_core_init_disconnected(struct dwc2_hsotg *hsotg,
 
 	if (g04_dwc2_diag.ep0_arm <= 8)
 		dev_info(hsotg->dev,
-			 "G321 EP0 arm after queue: CTL=%08x SIZ=%08x "
+			 "G322 EP0 arm after queue: CTL=%08x SIZ=%08x "
 			 "DMA=%08x INT=%08x active=%p\n",
 			 readl(hsotg->regs + DOEPCTL0),
 			 readl(hsotg->regs + DOEPTSIZ0),
@@ -2565,40 +2565,68 @@ irq_retry:
 	if (gintsts & GINTSTS_USBRST) {
 
 		u32 usb_status = readl(hsotg->regs + GOTGCTL);
-		u32 doepctl0;
+		u32 dcfg;
+		u32 mask;
+		unsigned int ep;
 
 		if (g04_dwc2_diag.reset++ < 8)
-			g04_dwc2_diag_regs(hsotg, "USBRST before reinit");
+			g04_dwc2_diag_regs(hsotg, "USBRST before vendor reset");
 
 		dev_dbg(hsotg->dev, "%s: USBRst\n", __func__);
 		dev_dbg(hsotg->dev, "GNPTXSTS=%08x\n",
 			readl(hsotg->regs + GNPTXSTS));
-
-		writel(GINTSTS_USBRST, hsotg->regs + GINTSTS);
 
 		/* Keep the gadget framework in sync across a bus-only reset. */
 		s3c_hsotg_disconnect(hsotg);
 
 		if (usb_status & GOTGCTL_BSESVLD) {
 			/*
-			 * The 2.94a reset handler SNAKs every OUT endpoint and
-			 * unconditionally restarts EP0.  Do the same here.  A
-			 * time debounce leaves the software request queued after
-			 * hardware has cleared EPENA/DOEPTSIZ0 on an earlier reset.
+			 * Follow the Meson6 2.94a reset path.  A direct SNAK write
+			 * does not preserve stale EPENA, unlike a read-modify-write
+			 * with EPDIS.  Do not reinitialize the core or the FIFOs here;
+			 * only reset the endpoint state needed for a new SETUP packet.
 			 */
+			for (ep = 0; ep <= hsotg->num_of_eps; ep++)
+				writel(DXEPCTL_SNAK, hsotg->regs + DOEPCTL(ep));
+			wmb();
+
+			if (g04_dwc2_diag.reset <= 8)
+				dev_info(hsotg->dev,
+					 "G322 USBRST after OUT SNAK: "
+					 "DOEPCTL0=%08x DOEPTSIZ0=%08x DMA0=%08x\n",
+					 readl(hsotg->regs + DOEPCTL0),
+					 readl(hsotg->regs + DOEPTSIZ0),
+					 readl(hsotg->regs + DOEPDMA(0)));
+
+			dcfg = readl(hsotg->regs + DCFG);
+			dcfg &= ~DCFG_DEVADDR_MASK;
+			writel(dcfg, hsotg->regs + DCFG);
+
+			/* Preserve existing masks while explicitly enabling EP0. */
+			mask = readl(hsotg->regs + DAINTMSK);
+			mask |= 1 | (1 << DAINT_OUTEP_SHIFT);
+			writel(mask, hsotg->regs + DAINTMSK);
+
+			mask = readl(hsotg->regs + DOEPMSK);
+			mask |= DOEPMSK_SETUPMSK | DOEPMSK_XFERCOMPLMSK |
+				DOEPMSK_AHBERRMSK | DOEPMSK_EPDISBLDMSK;
+			writel(mask, hsotg->regs + DOEPMSK);
+
+			mask = readl(hsotg->regs + DIEPMSK);
+			mask |= DIEPMSK_XFERCOMPLMSK | DIEPMSK_TIMEOUTMSK |
+				DIEPMSK_AHBERRMSK | DIEPMSK_EPDISBLDMSK;
+			writel(mask, hsotg->regs + DIEPMSK);
+
 			kill_all_requests(hsotg, &hsotg->eps[0],
 					  -ECONNRESET, true);
-
-			doepctl0 = readl(hsotg->regs + DOEPCTL0);
-			doepctl0 |= DXEPCTL_SNAK | DXEPCTL_USBACTEP;
-			if (doepctl0 & DXEPCTL_EPENA)
-				doepctl0 |= DXEPCTL_EPDIS;
-			writel(doepctl0, hsotg->regs + DOEPCTL0);
 			writel(0xff, hsotg->regs + DOEPINT(0));
-			s3c_hsotg_core_init_disconnected(hsotg, true);
+			s3c_hsotg_enqueue_setup(hsotg);
 		}
+
+		/* Match 2.94a: acknowledge reset after EP0 is fully armed. */
+		writel(GINTSTS_USBRST, hsotg->regs + GINTSTS);
 		if (g04_dwc2_diag.reset <= 8)
-			g04_dwc2_diag_regs(hsotg, "USBRST after reinit");
+			g04_dwc2_diag_regs(hsotg, "USBRST after vendor reset");
 	}
 
 	/* check both FIFOs */
@@ -3684,7 +3712,7 @@ int dwc2_gadget_init(struct dwc2_hsotg *hsotg, int irq)
 
 	/* Backport the v4.0 gadget-DMA opt-in for the Meson6 device tree. */
 	hsotg->g_using_dma = of_property_read_bool(dev->of_node, "g-use-dma");
-	dev_info(dev, "G321 gadget buffer DMA: %s\n",
+	dev_info(dev, "G322 gadget buffer DMA: %s\n",
 		 hsotg->g_using_dma ? "enabled" : "disabled");
 
 	/* Set default UTMI width */
