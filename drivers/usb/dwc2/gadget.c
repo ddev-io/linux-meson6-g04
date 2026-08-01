@@ -70,14 +70,17 @@ static void s3c_hsotg_dump(struct dwc2_hsotg *hsotg);
 
 /* Keep early USB diagnostics bounded so the RAM console retains boot logs. */
 struct g04_dwc2_diag_counters {
-	u8 reset;
-	u8 enumdone;
-	u8 rx;
-	u8 ep0_in;
-	u8 ep0_out;
-	u8 setup;
-	u8 enqueue;
-	u8 start;
+	unsigned int reset;
+	unsigned int enumdone;
+	unsigned int rx;
+	unsigned int ep0_in;
+	unsigned int ep0_out;
+	unsigned int ahberr;
+	unsigned int dma_map;
+	unsigned int dma_bounce;
+	unsigned int setup;
+	unsigned int enqueue;
+	unsigned int start;
 };
 
 static struct g04_dwc2_diag_counters g04_dwc2_diag;
@@ -86,7 +89,7 @@ static void g04_dwc2_diag_regs(struct dwc2_hsotg *hsotg,
 				const char *event)
 {
 	dev_info(hsotg->dev,
-		 "G318 %s: GI=%08x/%08x DA=%08x/%08x "
+		 "G319 %s: GI=%08x/%08x DA=%08x/%08x "
 		 "EP0I=%08x/%08x/%08x EP0O=%08x/%08x/%08x state=%u\n",
 		 event, readl(hsotg->regs + GINTSTS),
 		 readl(hsotg->regs + GINTMSK), readl(hsotg->regs + DAINT),
@@ -95,13 +98,13 @@ static void g04_dwc2_diag_regs(struct dwc2_hsotg *hsotg,
 		 readl(hsotg->regs + DOEPINT(0)), readl(hsotg->regs + DOEPCTL0),
 		 readl(hsotg->regs + DOEPTSIZ0), hsotg->ep0_state);
 	dev_info(hsotg->dev,
-		 "G318 %s core: DCTL=%08x DCFG=%08x DSTS=%08x "
+		 "G319 %s core: DCTL=%08x DCFG=%08x DSTS=%08x "
 		 "GOTGCTL=%08x GNPTXSTS=%08x\n",
 		 event, readl(hsotg->regs + DCTL), readl(hsotg->regs + DCFG),
 		 readl(hsotg->regs + DSTS), readl(hsotg->regs + GOTGCTL),
 		 readl(hsotg->regs + GNPTXSTS));
 	dev_info(hsotg->dev,
-		 "G318 %s hw: AHB=%08x USB=%08x RX=%08x NPTX=%08x "
+		 "G319 %s hw: AHB=%08x USB=%08x RX=%08x NPTX=%08x "
 		 "IM=%08x/%08x SNPS=%08x HW=%08x/%08x/%08x DMA0=%08x\n",
 		 event, readl(hsotg->regs + GAHBCFG),
 		 readl(hsotg->regs + GUSBCFG), readl(hsotg->regs + GRXFSIZ),
@@ -128,11 +131,12 @@ static void g04_dwc2_diag_regs(struct dwc2_hsotg *hsotg,
  * a core reset. This means we either need to fix the gadgets to take
  * account of DMA alignment, or add bounce buffers (yuerk).
  *
- * Until this issue is sorted out, we always return 'false'.
+ * Meson6's vendor driver uses buffer DMA.  Keep descriptor DMA disabled and
+ * use aligned bounce buffers for gadget requests that are not DWORD aligned.
  */
 static inline bool using_dma(struct dwc2_hsotg *hsotg)
 {
-	return false;	/* support is not complete */
+	return hsotg->g_using_dma;
 }
 
 /**
@@ -725,6 +729,12 @@ static void s3c_hsotg_start_req(struct dwc2_hsotg *hsotg,
 
 		dma_reg = dir_in ? DIEPDMA(index) : DOEPDMA(index);
 		writel(ureq->dma, hsotg->regs + dma_reg);
+		if (index == 0 && g04_dwc2_diag.dma_map++ < 16)
+			dev_info(hsotg->dev,
+				 "G319 DMA EP0 %s: buf=%p dma=%pad len=%u "
+				 "reg=%08x\n", dir_in ? "IN" : "OUT",
+				 ureq->buf, &ureq->dma, length,
+				 readl(hsotg->regs + dma_reg));
 
 		dev_dbg(hsotg->dev, "%s: %pad => 0x%08x\n",
 			__func__, &ureq->dma, dma_reg);
@@ -780,7 +790,7 @@ static void s3c_hsotg_start_req(struct dwc2_hsotg *hsotg,
 
 	if (index == 0 && g04_dwc2_diag.start++ < 8)
 		dev_info(hsotg->dev,
-			 "G318 start EP0 %s: len=%u packets=%u state=%u "
+			 "G319 start EP0 %s: len=%u packets=%u state=%u "
 			 "CTL=%08x SIZ=%08x req=%p\n",
 			 dir_in ? "IN" : "OUT", length, packets, hsotg->ep0_state,
 			 readl(hsotg->regs + epctrl_reg),
@@ -826,6 +836,53 @@ dma_error:
 	return -EIO;
 }
 
+static int s3c_hsotg_handle_unaligned_buf_start(struct dwc2_hsotg *hsotg,
+						 struct s3c_hsotg_ep *hs_ep,
+						 struct s3c_hsotg_req *hs_req)
+{
+	void *req_buf = hs_req->req.buf;
+
+	if (!using_dma(hsotg) || !((unsigned long)req_buf & 3) ||
+	    !hs_req->req.length)
+		return 0;
+
+	WARN_ON(hs_req->saved_req_buf);
+	hs_req->req.buf = kmalloc(hs_req->req.length, GFP_ATOMIC);
+	if (!hs_req->req.buf) {
+		hs_req->req.buf = req_buf;
+		dev_err(hsotg->dev, "%s: no DMA bounce buffer for %s\n",
+			__func__, hs_ep->ep.name);
+		return -ENOMEM;
+	}
+
+	hs_req->saved_req_buf = req_buf;
+	if (hs_ep->dir_in)
+		memcpy(hs_req->req.buf, req_buf, hs_req->req.length);
+
+	if (g04_dwc2_diag.dma_bounce++ < 8)
+		dev_info(hsotg->dev,
+			 "G319 DMA bounce %s: %p -> %p len=%u\n",
+			 hs_ep->ep.name, req_buf, hs_req->req.buf,
+			 hs_req->req.length);
+	return 0;
+}
+
+static void s3c_hsotg_handle_unaligned_buf_complete(
+		struct dwc2_hsotg *hsotg, struct s3c_hsotg_ep *hs_ep,
+		struct s3c_hsotg_req *hs_req)
+{
+	if (!using_dma(hsotg) || !hs_req->saved_req_buf)
+		return;
+
+	if (!hs_ep->dir_in && !hs_req->req.status)
+		memcpy(hs_req->saved_req_buf, hs_req->req.buf,
+		       hs_req->req.actual);
+
+	kfree(hs_req->req.buf);
+	hs_req->req.buf = hs_req->saved_req_buf;
+	hs_req->saved_req_buf = NULL;
+}
+
 static int s3c_hsotg_ep_queue(struct usb_ep *ep, struct usb_request *req,
 			      gfp_t gfp_flags)
 {
@@ -833,6 +890,7 @@ static int s3c_hsotg_ep_queue(struct usb_ep *ep, struct usb_request *req,
 	struct s3c_hsotg_ep *hs_ep = our_ep(ep);
 	struct dwc2_hsotg *hs = hs_ep->parent;
 	bool first;
+	int ret;
 
 	dev_dbg(hs->dev, "%s: req %p: %d@%p, noi=%d, zero=%d, snok=%d\n",
 		ep->name, req, req->length, req->buf, req->no_interrupt,
@@ -842,12 +900,15 @@ static int s3c_hsotg_ep_queue(struct usb_ep *ep, struct usb_request *req,
 	INIT_LIST_HEAD(&hs_req->queue);
 	req->actual = 0;
 	req->status = -EINPROGRESS;
+	ret = s3c_hsotg_handle_unaligned_buf_start(hs, hs_ep, hs_req);
+	if (ret)
+		return ret;
 
 	/* if we're using DMA, sync the buffers as necessary */
 	if (using_dma(hs)) {
-		int ret = s3c_hsotg_map_dma(hs, hs_ep, req);
+		ret = s3c_hsotg_map_dma(hs, hs_ep, req);
 		if (ret)
-			return ret;
+			goto err_restore_buf;
 	}
 
 	first = list_empty(&hs_ep->queue);
@@ -857,6 +918,14 @@ static int s3c_hsotg_ep_queue(struct usb_ep *ep, struct usb_request *req,
 		s3c_hsotg_start_req(hs, hs_ep, hs_req, false);
 
 	return 0;
+
+err_restore_buf:
+	if (hs_req->saved_req_buf) {
+		kfree(hs_req->req.buf);
+		hs_req->req.buf = hs_req->saved_req_buf;
+		hs_req->saved_req_buf = NULL;
+	}
+	return ret;
 }
 
 static int s3c_hsotg_ep_queue_lock(struct usb_ep *ep, struct usb_request *req,
@@ -1181,7 +1250,7 @@ static void s3c_hsotg_process_control(struct dwc2_hsotg *hsotg,
 		 ctrl->wValue, ctrl->wLength);
 	if (g04_dwc2_diag.setup++ < 16)
 		dev_info(hsotg->dev,
-			 "G318 SETUP %02x %02x %04x %04x %04x state=%u\n",
+			 "G319 SETUP %02x %02x %04x %04x %04x state=%u\n",
 			 ctrl->bRequestType, ctrl->bRequest,
 			 le16_to_cpu(ctrl->wValue), le16_to_cpu(ctrl->wIndex),
 			 le16_to_cpu(ctrl->wLength), hsotg->ep0_state);
@@ -1291,7 +1360,7 @@ static void s3c_hsotg_enqueue_setup(struct dwc2_hsotg *hsotg)
 
 	if (g04_dwc2_diag.enqueue++ < 8)
 		dev_info(hsotg->dev,
-			 "G318 enqueue EP0: queued=%u req=%p active=%p "
+			 "G319 enqueue EP0: queued=%u req=%p active=%p "
 			 "state=%u CTL=%08x SIZ=%08x\n",
 			 !list_empty(&hs_req->queue), hs_req, hsotg->eps[0].req,
 			 hsotg->ep0_state, readl(hsotg->regs + DOEPCTL0),
@@ -1371,11 +1440,12 @@ static void s3c_hsotg_complete_request(struct dwc2_hsotg *hsotg,
 	if (hs_req->req.status == -EINPROGRESS)
 		hs_req->req.status = result;
 
-	hs_ep->req = NULL;
-	list_del_init(&hs_req->queue);
-
 	if (using_dma(hsotg))
 		s3c_hsotg_unmap_dma(hsotg, hs_ep, hs_req);
+	s3c_hsotg_handle_unaligned_buf_complete(hsotg, hs_ep, hs_req);
+
+	hs_ep->req = NULL;
+	list_del_init(&hs_req->queue);
 
 	/*
 	 * call the complete request with the locks off, just in case the
@@ -1597,7 +1667,7 @@ static void s3c_hsotg_handle_rx(struct dwc2_hsotg *hsotg)
 	pktsts = (status & GRXSTS_PKTSTS_MASK) >> GRXSTS_PKTSTS_SHIFT;
 	if (g04_dwc2_diag.rx++ < 32)
 		dev_info(hsotg->dev,
-			 "G318 RX: GRXSTSP=%08x ep=%u sts=%u size=%u "
+			 "G319 RX: GRXSTSP=%08x ep=%u sts=%u size=%u "
 			 "state=%u DOEPINT0=%08x DOEPCTL0=%08x DOEPTSIZ0=%08x\n",
 			 grxstsr, epnum, pktsts, size, hsotg->ep0_state,
 			 readl(hsotg->regs + DOEPINT(0)),
@@ -1649,7 +1719,7 @@ static void s3c_hsotg_handle_rx(struct dwc2_hsotg *hsotg)
 			struct usb_ctrlrequest *ctrl = (void *)hsotg->ctrl_buff;
 
 			dev_info(hsotg->dev,
-				 "G318 SETUPRX data: %02x %02x %04x %04x %04x\n",
+				 "G319 SETUPRX data: %02x %02x %04x %04x %04x\n",
 				 ctrl->bRequestType, ctrl->bRequest,
 				 le16_to_cpu(ctrl->wValue), le16_to_cpu(ctrl->wIndex),
 				 le16_to_cpu(ctrl->wLength));
@@ -1911,7 +1981,7 @@ static void s3c_hsotg_epint(struct dwc2_hsotg *hsotg, unsigned int idx,
 	if (idx == 0 && ((!dir_in && g04_dwc2_diag.ep0_out++ < 32) ||
 			 (dir_in && g04_dwc2_diag.ep0_in++ < 32)))
 		dev_info(hsotg->dev,
-			 "G318 EP0 %s IRQ=%08x CTL=%08x SIZ=%08x "
+			 "G319 EP0 %s IRQ=%08x CTL=%08x SIZ=%08x "
 			 "DAINT=%08x/%08x state=%u req=%p\n",
 			 dir_in ? "IN" : "OUT", ints, ctrl,
 			 readl(hsotg->regs + epsiz_reg),
@@ -1973,8 +2043,16 @@ static void s3c_hsotg_epint(struct dwc2_hsotg *hsotg, unsigned int idx,
 		}
 	}
 
-	if (ints & DXEPINT_AHBERR)
-		dev_dbg(hsotg->dev, "%s: AHBErr\n", __func__);
+	if (ints & DXEPINT_AHBERR) {
+		if (g04_dwc2_diag.ahberr++ < 16)
+			dev_err(hsotg->dev,
+			"G319 AHBErr ep%u %s: INT=%08x CTL=%08x SIZ=%08x "
+			"DMA=%08x AHB=%08x\n", idx, dir_in ? "IN" : "OUT",
+			ints, ctrl, readl(hsotg->regs + epsiz_reg),
+			readl(hsotg->regs +
+			      (dir_in ? DIEPDMA(idx) : DOEPDMA(idx))),
+			readl(hsotg->regs + GAHBCFG));
+	}
 
 	if (ints & DXEPINT_SETUP) {  /* Setup or Timeout */
 		dev_dbg(hsotg->dev, "%s: Setup/Timeout\n",  __func__);
@@ -2284,7 +2362,8 @@ void s3c_hsotg_core_init_disconnected(struct dwc2_hsotg *hsotg,
 
 	if (using_dma(hsotg))
 		writel(GAHBCFG_GLBL_INTR_EN | GAHBCFG_DMA_EN |
-		       GAHBCFG_HBSTLEN_INCR4,
+		       (GAHBCFG_HBSTLEN_INCR4 << GAHBCFG_HBSTLEN_SHIFT) |
+		       GAHBCFG_AHB_SINGLE,
 		       hsotg->regs + GAHBCFG);
 	else
 		writel(((hsotg->dedicated_fifos) ? (GAHBCFG_NP_TXF_EMP_LVL |
@@ -2298,11 +2377,11 @@ void s3c_hsotg_core_init_disconnected(struct dwc2_hsotg *hsotg,
 	 * interrupts.
 	 */
 
-	writel(((hsotg->dedicated_fifos) ? DIEPMSK_TXFIFOEMPTY |
-		DIEPMSK_INTKNTXFEMPMSK : 0) |
+	writel(((hsotg->dedicated_fifos && !using_dma(hsotg)) ?
+		DIEPMSK_TXFIFOEMPTY | DIEPMSK_INTKNTXFEMPMSK : 0) |
 		DIEPMSK_EPDISBLDMSK | DIEPMSK_XFERCOMPLMSK |
 		DIEPMSK_TIMEOUTMSK | DIEPMSK_AHBERRMSK |
-		DIEPMSK_INTKNEPMISMSK,
+		(!using_dma(hsotg) ? DIEPMSK_INTKNEPMISMSK : 0),
 		hsotg->regs + DIEPMSK);
 
 	/*
@@ -2965,8 +3044,10 @@ static void s3c_hsotg_init(struct dwc2_hsotg *hsotg)
 	writel(GUSBCFG_FORCEDEVMODE | GUSBCFG_PHYIF16 |
 	       (0x6 << GUSBCFG_USBTRDTIM_SHIFT), hsotg->regs + GUSBCFG);
 
-	writel(using_dma(hsotg) ? GAHBCFG_DMA_EN : 0x0,
-	       hsotg->regs + GAHBCFG);
+	writel(using_dma(hsotg) ?
+	       GAHBCFG_DMA_EN |
+	       (GAHBCFG_HBSTLEN_INCR4 << GAHBCFG_HBSTLEN_SHIFT) |
+	       GAHBCFG_AHB_SINGLE : 0x0, hsotg->regs + GAHBCFG);
 }
 
 /**
@@ -3552,6 +3633,11 @@ int dwc2_gadget_init(struct dwc2_hsotg *hsotg, int irq)
 	int epnum;
 	int ret;
 	int i;
+
+	/* Backport the v4.0 gadget-DMA opt-in for the Meson6 device tree. */
+	hsotg->g_using_dma = of_property_read_bool(dev->of_node, "g-use-dma");
+	dev_info(dev, "G319 gadget buffer DMA: %s\n",
+		 hsotg->g_using_dma ? "enabled" : "disabled");
 
 	/* Set default UTMI width */
 	hsotg->phyif = GUSBCFG_PHYIF16;

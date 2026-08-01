@@ -158,12 +158,15 @@ struct s3c_hsotg_ep {
  * struct s3c_hsotg_req - data transfer request
  * @req: The USB gadget request
  * @queue: The list of requests for the endpoint this is queued for.
+ * @saved_req_buf: Original request buffer while DMA uses an aligned bounce
+ *                 buffer.
  * @in_progress: Has already had size/packets written to core
  * @mapped: DMA buffer for this request has been mapped via dma_map_single().
  */
 struct s3c_hsotg_req {
 	struct usb_request      req;
 	struct list_head        queue;
+	void                    *saved_req_buf;
 	unsigned char           in_progress;
 	unsigned char           mapped;
 };
@@ -688,13 +691,14 @@ struct dwc2_hsotg {
 	u32 phyif;
 	int fifo_mem;
 	unsigned int dedicated_fifos:1;
+	unsigned int g_using_dma:1;
 	unsigned char num_of_eps;
 	u32 fifo_map;
 
 	struct usb_request *ep0_reply;
 	struct usb_request *ctrl_req;
 	u8 ep0_buff[8];
-	u8 ctrl_buff[24];
+	u8 ctrl_buff[24] __aligned(4);
 
 	struct usb_gadget gadget;
 	unsigned int enabled:1;

@@ -90,6 +90,7 @@
 			vusb_d-supply = <&usb_vusb_d>;
 			vusb_a-supply = <&usb_vusb_a>;
 			dr_mode = "peripheral";
+			g-use-dma;
 			status = "okay";
 		};
 
