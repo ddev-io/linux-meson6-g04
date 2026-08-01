@@ -261,7 +261,8 @@ static void m3_nand_select_chip(struct aml_nand_chip *aml_chip, int chipnr)
 		case 1:
 		case 2:
 		case 3:
-
+			/* Match the working factory 3.0.101 CE settling time. */
+			udelay(10);
 			aml_chip->chip_selected = aml_chip->chip_enable[chipnr];
 			aml_chip->rb_received = aml_chip->rb_enable[chipnr];
 #if 0

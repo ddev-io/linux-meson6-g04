@@ -3919,7 +3919,9 @@ static struct aml_nand_flash_dev *aml_nand_get_flash_type(struct mtd_info *mtd,
 		dev_id[i] = chip->read_byte(mtd);
 	}
 	*maf_id = dev_id[0];
-	printk("NAND device id: %x %x %x %x %x %x \n", dev_id[0], dev_id[1], dev_id[2], dev_id[3], dev_id[4], dev_id[5]);
+	pr_info("G329 NAND CE0 ID: %02x %02x %02x %02x %02x %02x\n",
+		dev_id[0], dev_id[1], dev_id[2], dev_id[3], dev_id[4],
+		dev_id[5]);
 
 	/* Lookup the flash id */
 	for (i = 0; aml_nand_flash_ids[i].name != NULL; i++) {
@@ -5081,13 +5083,75 @@ else  if(!strncmp((char*)type->id, (char*)dev_id_sandisk_24nm_8g, strlen((const 
 	return type;
 }
 
+/*
+ * Keep the factory 3.0.101 identification waveform while Linux 3.19 fills
+ * the generic NAND fields.  nand_scan_ident() otherwise replaces its default
+ * small-page command callback with nand_command_lp() after identifying this
+ * 8 KiB-page Micron device.  That callback sends two column cycles for
+ * READID, but the Meson6 vendor scanner and the second chip-enable expect the
+ * original single column cycle.  aml_nand_scan_ident() replaces this helper
+ * with aml_nand_command after the final vendor geometry is known.
+ */
+static void aml_nand_ident_command(struct mtd_info *mtd,
+		unsigned int command, int column, int page_addr)
+{
+	struct nand_chip *chip = mtd->priv;
+	int ctrl = NAND_CTRL_CLE | NAND_CTRL_CHANGE;
+
+	chip->cmd_ctrl(mtd, command, ctrl);
+
+	ctrl = NAND_CTRL_ALE | NAND_CTRL_CHANGE;
+	if (column != -1) {
+		if (chip->options & NAND_BUSWIDTH_16)
+			column >>= 1;
+		chip->cmd_ctrl(mtd, column, ctrl);
+		ctrl &= ~NAND_CTRL_CHANGE;
+	}
+	if (page_addr != -1) {
+		chip->cmd_ctrl(mtd, page_addr, ctrl);
+		ctrl &= ~NAND_CTRL_CHANGE;
+		chip->cmd_ctrl(mtd, page_addr >> 8, ctrl);
+		if (chip->chipsize > (32 << 20))
+			chip->cmd_ctrl(mtd, page_addr >> 16, ctrl);
+	}
+	chip->cmd_ctrl(mtd, NAND_CMD_NONE, NAND_NCE | NAND_CTRL_CHANGE);
+
+	switch (command) {
+	case NAND_CMD_PAGEPROG:
+	case NAND_CMD_ERASE1:
+	case NAND_CMD_ERASE2:
+	case NAND_CMD_SEQIN:
+	case NAND_CMD_STATUS:
+		return;
+	case NAND_CMD_RESET:
+		if (chip->dev_ready)
+			break;
+		udelay(chip->chip_delay);
+		chip->cmd_ctrl(mtd, NAND_CMD_STATUS,
+			       NAND_CTRL_CLE | NAND_CTRL_CHANGE);
+		chip->cmd_ctrl(mtd, NAND_CMD_NONE,
+			       NAND_NCE | NAND_CTRL_CHANGE);
+		while (!(chip->read_byte(mtd) & NAND_STATUS_READY))
+			;
+		return;
+	default:
+		if (!chip->dev_ready) {
+			udelay(chip->chip_delay);
+			return;
+		}
+	}
+
+	ndelay(100);
+	nand_wait_ready(mtd);
+}
+
 static int aml_nand_scan_ident(struct mtd_info *mtd, int maxchips)
 {
-	int i, busw, nand_maf_id, valid_chip_num = 1;
+	int i, j, busw, nand_maf_id, valid_chip_num = 1;
 	struct nand_chip *chip = mtd->priv;
 	struct aml_nand_chip *aml_chip = mtd_to_nand_chip(mtd);
 	struct aml_nand_flash_dev *aml_type;
-	u8 dev_id[MAX_ID_LEN], onfi_features[4];
+	u8 dev_id[MAX_ID_LEN], ce_id[MAX_ID_LEN], onfi_features[4];
 	unsigned temp_chip_shift;
 
 	/* Get buswidth to select the correct functions */
@@ -5126,16 +5190,21 @@ static int aml_nand_scan_ident(struct mtd_info *mtd, int maxchips)
 
 		/* Send the command for reading device ID */
 		chip->cmdfunc(mtd, NAND_CMD_READID, 0x00, -1);
-		/* Read manufacturer and device IDs */
+		for (j = 0; j < MAX_ID_LEN; j++)
+			ce_id[j] = chip->read_byte(mtd);
+		pr_info("G329 NAND CE%d ID: %02x %02x %02x %02x %02x %02x\n",
+			i, ce_id[0], ce_id[1], ce_id[2], ce_id[3], ce_id[4],
+			ce_id[5]);
 
-		if (nand_maf_id != chip->read_byte(mtd) || aml_type->id[1] != chip->read_byte(mtd))
+		if (nand_maf_id != ce_id[0] || aml_type->id[1] != ce_id[1])
 		//if (nand_maf_id != dev_id[0] || aml_type->id[1] != dev_id[1])
 			aml_chip->valid_chip[i] = 0;
 		else
 			valid_chip_num ++;
 	}
+	pr_info("G329 NAND detected chips: %d of %d configured\n",
+		valid_chip_num, maxchips);
 	if (i > 1) {
-		printk(KERN_INFO "%d NAND chips detected\n", valid_chip_num);
 		/*if ((aml_chip->valid_chip[1] == 0) && (aml_chip->valid_chip[2] == 1)) {
 			printk("ce1 and ce2 connected\n");
 			aml_chip->chip_enable[2] = (aml_chip->chip_enable[1] & aml_chip->chip_enable[2]);
@@ -6854,16 +6923,16 @@ int aml_nand_init(struct aml_nand_chip *aml_chip)
 	    chip->ecc.mode == NAND_ECC_HW_SYNDROME ||
 	    chip->ecc.mode == NAND_ECC_HW_OOB_FIRST) {
 		chip->ecc.strength = 1;
-		pr_info("G328 NAND ECC: bootstrap strength=1 before ident\n");
+		pr_info("G329 NAND ECC: bootstrap strength=1 before ident\n");
 	}
 
 	/*
-	 * Let the Linux 3.19 core install its default callbacks, but do not let
-	 * the generic ID table finalize this vendor controller's geometry.  The
-	 * generic Micron 0x2c:0x88 match succeeds, then loses CE1, two-plane
-	 * mode and the vendor OOB/ECC data.  Preserve the board state across the
-	 * core ident pass and let the Amlogic ID decoder produce the final
-	 * physical geometry before nand_scan_tail().
+	 * Let the Linux 3.19 core fill its generic fields, but keep the factory
+	 * one-column READID waveform throughout both identification passes.  The
+	 * generic Micron 0x2c:0x88 match must not finalize this controller's
+	 * geometry: preserve the board state and let the Amlogic ID decoder find
+	 * both chip-enables and produce the final physical geometry before the
+	 * single nand_scan_tail() call.
 	 */
 	board_options = chip->options;
 	board_ops_mode = aml_chip->ops_mode;
@@ -6872,10 +6941,12 @@ int aml_nand_init(struct aml_nand_chip *aml_chip)
 	for (i = 0; i < aml_chip->chip_num; i++)
 		board_valid_chip[i] = aml_chip->valid_chip[i];
 
+	chip->cmdfunc = aml_nand_ident_command;
+	pr_info("G329 NAND ident: factory single-column command handler active\n");
 	err = nand_scan_ident(mtd, 1, NULL);
 	if (err) {
 		dev_err(aml_chip->device,
-			"G328 NAND generic ident bootstrap failed: %d\n", err);
+			"G329 NAND generic ident bootstrap failed: %d\n", err);
 		goto exit_error;
 	}
 
@@ -6889,10 +6960,10 @@ int aml_nand_init(struct aml_nand_chip *aml_chip)
 	err = aml_nand_scan_ident(mtd, aml_chip->chip_num);
 	if (err) {
 		dev_err(aml_chip->device,
-			"G328 NAND vendor ident failed: %d\n", err);
+			"G329 NAND vendor ident failed: %d\n", err);
 		goto exit_error;
 	}
-	pr_info("G328 NAND valid chips: [%u %u %u %u]\n",
+	pr_info("G329 NAND valid chips: [%u %u %u %u]\n",
 		aml_chip->valid_chip[0], aml_chip->valid_chip[1],
 		aml_chip->valid_chip[2], aml_chip->valid_chip[3]);
 
@@ -6954,17 +7025,18 @@ int aml_nand_init(struct aml_nand_chip *aml_chip)
 		}
 	}
 	aml_nand_update_ecc_strength(aml_chip);
-	pr_info("G328 NAND geometry: physical page=%u erase=%u oob=%u "
+	pr_info("G329 NAND geometry: physical page=%u erase=%u oob=%u "
 		"virtual page=%u erase=%u oob=%u size=%llu\n",
 		aml_chip->page_size, aml_chip->block_size, aml_chip->oob_size,
 		mtd->writesize, mtd->erasesize, mtd->oobsize,
 		(unsigned long long)mtd->size);
-	pr_info("G328 NAND addressing: page_shift=%u phys_erase_shift=%u "
-		"chip_shift=%u pagemask=0x%x planes=%u chips=%u internal=%u\n",
+	pr_info("G329 NAND addressing: page_shift=%u phys_erase_shift=%u "
+		"chip_shift=%u pagemask=0x%x planes=%u configured_chips=%u "
+		"detected_chips=%u internal=%u\n",
 		chip->page_shift, chip->phys_erase_shift, chip->chip_shift,
 		chip->pagemask, aml_chip->plane_num, aml_chip->chip_num,
-		aml_chip->internal_chipnr);
-	pr_info("G328 NAND ECC: bch=0x%x strength=%u step=%u bytes=%u "
+		valid_chip_num, aml_chip->internal_chipnr);
+	pr_info("G329 NAND ECC: bch=0x%x strength=%u step=%u bytes=%u "
 		"ops=0x%x options=0x%x\n", aml_chip->bch_mode,
 		chip->ecc.strength, chip->ecc.size, chip->ecc.bytes,
 		aml_chip->ops_mode, aml_chip->options);
@@ -7088,7 +7160,7 @@ int aml_nand_init(struct aml_nand_chip *aml_chip)
 	err = nand_scan_tail(mtd);
 	if (err) {
 		dev_err(aml_chip->device,
-			"G328 NAND scan tail failed: %d\n", err);
+			"G329 NAND scan tail failed: %d\n", err);
 		goto exit_error;
 	}
 	mtd->_suspend = aml_nand_suspend;
