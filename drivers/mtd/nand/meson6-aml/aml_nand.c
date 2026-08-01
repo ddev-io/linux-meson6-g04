@@ -5189,16 +5189,6 @@ static int aml_nand_scan_ident(struct mtd_info *mtd, int maxchips)
 	return 0;
 }
 
-int aml_nand_scan(struct mtd_info *mtd, int maxchips)
-{
-	int ret;
-
-	ret = aml_nand_scan_ident(mtd, maxchips);
-	if (!ret)
-		ret = nand_scan_tail(mtd);
-	return ret;
-}
-
 static int aml_platform_options_confirm(struct aml_nand_chip *aml_chip)
 {
 	struct mtd_info *mtd = &aml_chip->mtd;
@@ -6542,6 +6532,11 @@ int aml_nand_init(struct aml_nand_chip *aml_chip)
 	int err = 0, i = 0, phys_erase_shift;
 	int oobmul  ;
 	unsigned por_cfg, valid_chip_num = 0;
+	unsigned int board_options;
+	unsigned int board_ops_mode;
+	unsigned int board_valid_chip[MAX_CHIP_NUM];
+	int (*board_block_bad)(struct mtd_info *, loff_t, int);
+	int (*board_block_markbad)(struct mtd_info *, loff_t);
 #ifdef CONFIG_AML_NAND_ENV
 	int ret;
 	struct device *devp;
@@ -6859,31 +6854,47 @@ int aml_nand_init(struct aml_nand_chip *aml_chip)
 	    chip->ecc.mode == NAND_ECC_HW_SYNDROME ||
 	    chip->ecc.mode == NAND_ECC_HW_OOB_FIRST) {
 		chip->ecc.strength = 1;
-		pr_info("Amlogic NAND ECC: bootstrap strength=1 before nand_scan\n");
+		pr_info("G328 NAND ECC: bootstrap strength=1 before ident\n");
 	}
 
-	if (nand_scan(mtd, aml_chip->chip_num) == -ENODEV) {
-		chip->options = 0;
-		chip->options |=  NAND_SKIP_BBTSCAN;
-		chip->options |= NAND_NO_SUBPAGE_WRITE;
-		if (aml_nand_scan(mtd, aml_chip->chip_num)) {
-			err = -ENXIO;
-			goto exit_error;
-		}
+	/*
+	 * Let the Linux 3.19 core install its default callbacks, but do not let
+	 * the generic ID table finalize this vendor controller's geometry.  The
+	 * generic Micron 0x2c:0x88 match succeeds, then loses CE1, two-plane
+	 * mode and the vendor OOB/ECC data.  Preserve the board state across the
+	 * core ident pass and let the Amlogic ID decoder produce the final
+	 * physical geometry before nand_scan_tail().
+	 */
+	board_options = chip->options;
+	board_ops_mode = aml_chip->ops_mode;
+	board_block_bad = chip->block_bad;
+	board_block_markbad = chip->block_markbad;
+	for (i = 0; i < aml_chip->chip_num; i++)
+		board_valid_chip[i] = aml_chip->valid_chip[i];
+
+	err = nand_scan_ident(mtd, 1, NULL);
+	if (err) {
+		dev_err(aml_chip->device,
+			"G328 NAND generic ident bootstrap failed: %d\n", err);
+		goto exit_error;
 	}
-	else {
-		for (i=1; i<aml_chip->chip_num; i++) {
-			aml_chip->valid_chip[i] = 0;
-		}
-		aml_chip->options = NAND_DEFAULT_OPTIONS;
-		aml_chip->page_size = mtd->writesize;
-		aml_chip->block_size = mtd->erasesize;
-		aml_chip->oob_size = mtd->oobsize;
-		aml_chip->plane_num = 1;
-		aml_chip->internal_chipnr = 1;
-		chip->ecc.read_page_raw = aml_nand_read_page_raw;
-		chip->ecc.write_page_raw = aml_nand_write_page_raw;
+
+	chip->options = board_options;
+	aml_chip->ops_mode = board_ops_mode;
+	chip->block_bad = board_block_bad;
+	chip->block_markbad = board_block_markbad;
+	for (i = 0; i < aml_chip->chip_num; i++)
+		aml_chip->valid_chip[i] = board_valid_chip[i];
+
+	err = aml_nand_scan_ident(mtd, aml_chip->chip_num);
+	if (err) {
+		dev_err(aml_chip->device,
+			"G328 NAND vendor ident failed: %d\n", err);
+		goto exit_error;
 	}
+	pr_info("G328 NAND valid chips: [%u %u %u %u]\n",
+		aml_chip->valid_chip[0], aml_chip->valid_chip[1],
+		aml_chip->valid_chip[2], aml_chip->valid_chip[3]);
 
 	valid_chip_num = 0;
 	for (i=0; i<aml_chip->chip_num; i++) {
@@ -6933,9 +6944,6 @@ int aml_nand_init(struct aml_nand_chip *aml_chip)
 
 	chip->scan_bbt = aml_nand_scan_bbt;
 
-	mtd->_suspend = aml_nand_suspend;
-	mtd->_resume = aml_nand_resume;
-
 	if (aml_chip->aml_nand_adjust_timing)
 		aml_chip->aml_nand_adjust_timing(aml_chip);
 
@@ -6946,7 +6954,21 @@ int aml_nand_init(struct aml_nand_chip *aml_chip)
 		}
 	}
 	aml_nand_update_ecc_strength(aml_chip);
-	mtd->writebufsize = mtd->writesize;
+	pr_info("G328 NAND geometry: physical page=%u erase=%u oob=%u "
+		"virtual page=%u erase=%u oob=%u size=%llu\n",
+		aml_chip->page_size, aml_chip->block_size, aml_chip->oob_size,
+		mtd->writesize, mtd->erasesize, mtd->oobsize,
+		(unsigned long long)mtd->size);
+	pr_info("G328 NAND addressing: page_shift=%u phys_erase_shift=%u "
+		"chip_shift=%u pagemask=0x%x planes=%u chips=%u internal=%u\n",
+		chip->page_shift, chip->phys_erase_shift, chip->chip_shift,
+		chip->pagemask, aml_chip->plane_num, aml_chip->chip_num,
+		aml_chip->internal_chipnr);
+	pr_info("G328 NAND ECC: bch=0x%x strength=%u step=%u bytes=%u "
+		"ops=0x%x options=0x%x\n", aml_chip->bch_mode,
+		chip->ecc.strength, chip->ecc.size, chip->ecc.bytes,
+		aml_chip->ops_mode, aml_chip->options);
+
 #if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON3
 	switch(aml_chip->bch_mode){
 		case NAND_ECC_BCH8:
@@ -7061,6 +7083,16 @@ int aml_nand_init(struct aml_nand_chip *aml_chip)
 		chip->ecc.layout->oobavail += chip->ecc.layout->oobfree[i].length;
 	mtd->oobavail = chip->ecc.layout->oobavail;
 	mtd->ecclayout = chip->ecc.layout;
+
+	/* Finalize only after vendor geometry, ECC and OOB layout are complete. */
+	err = nand_scan_tail(mtd);
+	if (err) {
+		dev_err(aml_chip->device,
+			"G328 NAND scan tail failed: %d\n", err);
+		goto exit_error;
+	}
+	mtd->_suspend = aml_nand_suspend;
+	mtd->_resume = aml_nand_resume;
 
 	aml_chip->virtual_page_size = mtd->writesize;
 	aml_chip->virtual_block_size = mtd->erasesize;

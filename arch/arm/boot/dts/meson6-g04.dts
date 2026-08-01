@@ -48,6 +48,10 @@
 	};
 
 	chosen {
+		#address-cells = <1>;
+		#size-cells = <1>;
+		ranges;
+
 		stdout-path = &uart_A;
 		bootargs = "console=ttyAML0,115200n8 earlyprintk";
 

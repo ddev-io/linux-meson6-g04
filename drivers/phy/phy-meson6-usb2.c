@@ -57,7 +57,7 @@ static int meson6_usb2_phy_init(struct phy *phy)
 	struct meson6_usb2_phy *priv = phy_get_drvdata(phy);
 	void __iomem *phy_a = priv->regs + MESON6_USB_PHY_A_OFFSET;
 	void __iomem *phy_b = priv->regs + MESON6_USB_PHY_B_OFFSET;
-	u32 config_a, config_b, ctrl_a, ctrl_b;
+	u32 ctrl_a, ctrl_b;
 
 	if (priv->initialized)
 		return 0;
@@ -99,35 +99,24 @@ static int meson6_usb2_phy_init(struct phy *phy)
 		MESON6_USB_CTRL_POR, 0);
 	udelay(500);
 
-	config_a = readl(phy_a + MESON6_USB_CONFIG);
 	ctrl_a = readl(phy_a + MESON6_USB_CTRL);
-	config_b = readl(phy_b + MESON6_USB_CONFIG);
 	ctrl_b = readl(phy_b + MESON6_USB_CTRL);
 	if (!(ctrl_a & MESON6_USB_CTRL_CLK_DETECTED))
 		dev_warn(priv->dev, "USB-A PHY clock was not detected\n");
 	if (!(ctrl_b & MESON6_USB_CTRL_CLK_DETECTED))
 		dev_warn(priv->dev, "USB-B PHY clock was not detected\n");
-	dev_info(priv->dev,
-		 "G327 PHY A config=%08x ctrl=%08x B config=%08x ctrl=%08x\n",
-		 config_a, ctrl_a, config_b, ctrl_b);
-
 	priv->initialized = true;
 	return 0;
 }
 
 static int meson6_usb2_phy_exit(struct phy *phy)
 {
-	struct meson6_usb2_phy *priv = phy_get_drvdata(phy);
-
 	/*
 	 * The vendor driver leaves both PHY clocks and the shared USB gates on.
 	 * DWC2 calls phy_exit() once after endpoint creation and phy_init() again
 	 * when Android gadget binds; tearing the hardware down here makes that
 	 * transition differ from the working 3.0.101 lifetime.
 	 */
-	if (priv->initialized)
-		dev_dbg(priv->dev, "G327 keeping Meson6 USB PHY initialized\n");
-
 	return 0;
 }
 

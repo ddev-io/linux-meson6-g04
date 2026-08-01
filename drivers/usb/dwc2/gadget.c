@@ -68,54 +68,6 @@ static inline void __bic32(void __iomem *ptr, u32 val)
 /* forward decleration of functions */
 static void s3c_hsotg_dump(struct dwc2_hsotg *hsotg);
 
-/* Keep early USB diagnostics bounded so the RAM console retains boot logs. */
-struct g04_dwc2_diag_counters {
-	unsigned int reset;
-	unsigned int enumdone;
-	unsigned int rx;
-	unsigned int ep0_in;
-	unsigned int ep0_out;
-	unsigned int ahberr;
-	unsigned int dma_map;
-	unsigned int dma_bounce;
-	unsigned int ep0_arm;
-	unsigned int ep0_active;
-	unsigned int setup;
-	unsigned int enqueue;
-	unsigned int start;
-};
-
-static struct g04_dwc2_diag_counters g04_dwc2_diag;
-
-static void g04_dwc2_diag_regs(struct dwc2_hsotg *hsotg,
-				const char *event)
-{
-	dev_info(hsotg->dev,
-		 "G324 %s: GI=%08x/%08x DA=%08x/%08x "
-		 "EP0I=%08x/%08x/%08x EP0O=%08x/%08x/%08x state=%u\n",
-		 event, readl(hsotg->regs + GINTSTS),
-		 readl(hsotg->regs + GINTMSK), readl(hsotg->regs + DAINT),
-		 readl(hsotg->regs + DAINTMSK), readl(hsotg->regs + DIEPINT(0)),
-		 readl(hsotg->regs + DIEPCTL0), readl(hsotg->regs + DIEPTSIZ0),
-		 readl(hsotg->regs + DOEPINT(0)), readl(hsotg->regs + DOEPCTL0),
-		 readl(hsotg->regs + DOEPTSIZ0), hsotg->ep0_state);
-	dev_info(hsotg->dev,
-		 "G324 %s core: DCTL=%08x DCFG=%08x DSTS=%08x "
-		 "GOTGCTL=%08x GNPTXSTS=%08x\n",
-		 event, readl(hsotg->regs + DCTL), readl(hsotg->regs + DCFG),
-		 readl(hsotg->regs + DSTS), readl(hsotg->regs + GOTGCTL),
-		 readl(hsotg->regs + GNPTXSTS));
-	dev_info(hsotg->dev,
-		 "G324 %s hw: AHB=%08x USB=%08x RX=%08x NPTX=%08x "
-		 "IM=%08x/%08x SNPS=%08x HW=%08x/%08x/%08x DMA0=%08x\n",
-		 event, readl(hsotg->regs + GAHBCFG),
-		 readl(hsotg->regs + GUSBCFG), readl(hsotg->regs + GRXFSIZ),
-		 readl(hsotg->regs + GNPTXFSIZ), readl(hsotg->regs + DIEPMSK),
-		 readl(hsotg->regs + DOEPMSK), readl(hsotg->regs + GSNPSID),
-		 readl(hsotg->regs + GHWCFG2), readl(hsotg->regs + GHWCFG3),
-		 readl(hsotg->regs + GHWCFG4), readl(hsotg->regs + DOEPDMA(0)));
-}
-
 /**
  * using_dma - return the DMA status of the driver.
  * @hsotg: The driver state.
@@ -718,16 +670,9 @@ static void s3c_hsotg_start_req(struct dwc2_hsotg *hsotg,
 	/*
 	 * A bus reset does not clear EPENA on this DWC OTG 2.94a core.  The
 	 * factory driver deliberately overwrites the stale EP0 transfer and
-	 * finishes with a clean EPENA/CNAK command, so keep the diagnostic but
-	 * continue into the same sequence here.
+	 * finishes with a clean EPENA/CNAK command, so continue into the same
+	 * sequence here.
 	 */
-	if (index == 0 && !dir_in &&
-	    hsotg->ep0_state == DWC2_EP0_SETUP &&
-	    (ctrl & DXEPCTL_EPENA)) {
-		if (g04_dwc2_diag.ep0_active++ < 8)
-			g04_dwc2_diag_regs(hsotg,
-					    "EP0 SETUP factory overwrite");
-	}
 
 	/* store the request as the current one we're doing */
 	hs_ep->req = hs_req;
@@ -745,12 +690,6 @@ static void s3c_hsotg_start_req(struct dwc2_hsotg *hsotg,
 
 		dma_reg = dir_in ? DIEPDMA(index) : DOEPDMA(index);
 		writel(ureq->dma, hsotg->regs + dma_reg);
-		if (index == 0 && g04_dwc2_diag.dma_map++ < 16)
-			dev_info(hsotg->dev,
-				 "G324 DMA EP0 %s: buf=%p dma=%pad len=%u "
-				 "reg=%08x\n", dir_in ? "IN" : "OUT",
-				 ureq->buf, &ureq->dma, length,
-				 readl(hsotg->regs + dma_reg));
 
 		dev_dbg(hsotg->dev, "%s: %pad => 0x%08x\n",
 			__func__, &ureq->dma, dma_reg);
@@ -823,14 +762,6 @@ static void s3c_hsotg_start_req(struct dwc2_hsotg *hsotg,
 	dev_dbg(hsotg->dev, "%s: DXEPCTL=0x%08x\n",
 		__func__, readl(hsotg->regs + epctrl_reg));
 
-	if (index == 0 && g04_dwc2_diag.start++ < 8)
-		dev_info(hsotg->dev,
-			 "G324 start EP0 %s: len=%u packets=%u state=%u "
-			 "CTL=%08x SIZ=%08x req=%p\n",
-			 dir_in ? "IN" : "OUT", length, packets, hsotg->ep0_state,
-			 readl(hsotg->regs + epctrl_reg),
-			 readl(hsotg->regs + epsize_reg), hs_ep->req);
-
 	/* enable ep interrupts */
 	s3c_hsotg_ctrl_epint(hsotg, hs_ep->index, hs_ep->dir_in, 1);
 }
@@ -894,11 +825,6 @@ static int s3c_hsotg_handle_unaligned_buf_start(struct dwc2_hsotg *hsotg,
 	if (hs_ep->dir_in)
 		memcpy(hs_req->req.buf, req_buf, hs_req->req.length);
 
-	if (g04_dwc2_diag.dma_bounce++ < 8)
-		dev_info(hsotg->dev,
-			 "G324 DMA bounce %s: %p -> %p len=%u\n",
-			 hs_ep->ep.name, req_buf, hs_req->req.buf,
-			 hs_req->req.length);
 	return 0;
 }
 
@@ -1283,13 +1209,6 @@ static void s3c_hsotg_process_control(struct dwc2_hsotg *hsotg,
 	dev_dbg(hsotg->dev, "ctrl Req=%02x, Type=%02x, V=%04x, L=%04x\n",
 		 ctrl->bRequest, ctrl->bRequestType,
 		 ctrl->wValue, ctrl->wLength);
-	if (g04_dwc2_diag.setup++ < 16)
-		dev_info(hsotg->dev,
-			 "G324 SETUP %02x %02x %04x %04x %04x state=%u\n",
-			 ctrl->bRequestType, ctrl->bRequest,
-			 le16_to_cpu(ctrl->wValue), le16_to_cpu(ctrl->wIndex),
-			 le16_to_cpu(ctrl->wLength), hsotg->ep0_state);
-
 	if (ctrl->wLength == 0) {
 		ep0->dir_in = 1;
 		hsotg->ep0_state = DWC2_EP0_STATUS_IN;
@@ -1392,14 +1311,6 @@ static void s3c_hsotg_enqueue_setup(struct dwc2_hsotg *hsotg)
 	req->length = 24;
 	req->buf = hsotg->ctrl_buff;
 	req->complete = s3c_hsotg_complete_setup;
-
-	if (g04_dwc2_diag.enqueue++ < 8)
-		dev_info(hsotg->dev,
-			 "G324 enqueue EP0: queued=%u req=%p active=%p "
-			 "state=%u CTL=%08x SIZ=%08x\n",
-			 !list_empty(&hs_req->queue), hs_req, hsotg->eps[0].req,
-			 hsotg->ep0_state, readl(hsotg->regs + DOEPCTL0),
-			 readl(hsotg->regs + DOEPTSIZ0));
 
 	if (!list_empty(&hs_req->queue)) {
 		dev_dbg(hsotg->dev, "%s already queued???\n", __func__);
@@ -1688,7 +1599,6 @@ static u32 s3c_hsotg_read_frameno(struct dwc2_hsotg *hsotg)
 static void s3c_hsotg_handle_rx(struct dwc2_hsotg *hsotg)
 {
 	u32 grxstsr = readl(hsotg->regs + GRXSTSP);
-	u32 pktsts;
 	u32 epnum, status, size;
 
 	WARN_ON(using_dma(hsotg));
@@ -1698,16 +1608,6 @@ static void s3c_hsotg_handle_rx(struct dwc2_hsotg *hsotg)
 
 	size = grxstsr & GRXSTS_BYTECNT_MASK;
 	size >>= GRXSTS_BYTECNT_SHIFT;
-
-	pktsts = (status & GRXSTS_PKTSTS_MASK) >> GRXSTS_PKTSTS_SHIFT;
-	if (g04_dwc2_diag.rx++ < 32)
-		dev_info(hsotg->dev,
-			 "G324 RX: GRXSTSP=%08x ep=%u sts=%u size=%u "
-			 "state=%u DOEPINT0=%08x DOEPCTL0=%08x DOEPTSIZ0=%08x\n",
-			 grxstsr, epnum, pktsts, size, hsotg->ep0_state,
-			 readl(hsotg->regs + DOEPINT(0)),
-			 readl(hsotg->regs + DOEPCTL0),
-			 readl(hsotg->regs + DOEPTSIZ0));
 
 	if (1)
 		dev_dbg(hsotg->dev, "%s: GRXSTSP=0x%08x (%d@%d)\n",
@@ -1749,16 +1649,6 @@ static void s3c_hsotg_handle_rx(struct dwc2_hsotg *hsotg)
 		WARN_ON(hsotg->ep0_state != DWC2_EP0_SETUP);
 
 		s3c_hsotg_rx_data(hsotg, epnum, size);
-		if (size == sizeof(struct usb_ctrlrequest) && epnum == 0 &&
-		    g04_dwc2_diag.setup < 16) {
-			struct usb_ctrlrequest *ctrl = (void *)hsotg->ctrl_buff;
-
-			dev_info(hsotg->dev,
-				 "G324 SETUPRX data: %02x %02x %04x %04x %04x\n",
-				 ctrl->bRequestType, ctrl->bRequest,
-				 le16_to_cpu(ctrl->wValue), le16_to_cpu(ctrl->wIndex),
-				 le16_to_cpu(ctrl->wLength));
-		}
 		break;
 
 	default:
@@ -2013,17 +1903,6 @@ static void s3c_hsotg_epint(struct dwc2_hsotg *hsotg, unsigned int idx,
 	/* Clear endpoint interrupts */
 	writel(ints, hsotg->regs + epint_reg);
 
-	if (idx == 0 && ((!dir_in && g04_dwc2_diag.ep0_out++ < 32) ||
-			 (dir_in && g04_dwc2_diag.ep0_in++ < 32)))
-		dev_info(hsotg->dev,
-			 "G324 EP0 %s IRQ=%08x CTL=%08x SIZ=%08x "
-			 "DAINT=%08x/%08x state=%u req=%p\n",
-			 dir_in ? "IN" : "OUT", ints, ctrl,
-			 readl(hsotg->regs + epsiz_reg),
-			 readl(hsotg->regs + DAINT),
-			 readl(hsotg->regs + DAINTMSK), hsotg->ep0_state,
-			 hs_ep->req);
-
 	dev_dbg(hsotg->dev, "%s: ep%d(%s) DxEPINT=0x%08x\n",
 		__func__, idx, dir_in ? "in" : "out", ints);
 
@@ -2076,17 +1955,6 @@ static void s3c_hsotg_epint(struct dwc2_hsotg *hsotg, unsigned int idx,
 				writel(dctl, hsotg->regs + DCTL);
 			}
 		}
-	}
-
-	if (ints & DXEPINT_AHBERR) {
-		if (g04_dwc2_diag.ahberr++ < 16)
-			dev_err(hsotg->dev,
-			"G324 AHBErr ep%u %s: INT=%08x CTL=%08x SIZ=%08x "
-			"DMA=%08x AHB=%08x\n", idx, dir_in ? "IN" : "OUT",
-			ints, ctrl, readl(hsotg->regs + epsiz_reg),
-			readl(hsotg->regs +
-			      (dir_in ? DIEPDMA(idx) : DOEPDMA(idx))),
-			readl(hsotg->regs + GAHBCFG));
 	}
 
 	if (ints & DXEPINT_SETUP) {  /* Setup or Timeout */
@@ -2186,8 +2054,6 @@ static void s3c_hsotg_irq_enumdone(struct dwc2_hsotg *hsotg)
 	}
 	dev_info(hsotg->dev, "new device is %s\n",
 		 usb_speed_string(hsotg->gadget.speed));
-	if (g04_dwc2_diag.enumdone++ < 8)
-		g04_dwc2_diag_regs(hsotg, "ENUMDONE before EP0");
 
 	/*
 	 * we should now know the maximum packet size for an
@@ -2208,8 +2074,6 @@ static void s3c_hsotg_irq_enumdone(struct dwc2_hsotg *hsotg)
 	dev_dbg(hsotg->dev, "EP0: DIEPCTL0=0x%08x, DOEPCTL0=0x%08x\n",
 		readl(hsotg->regs + DIEPCTL0),
 		readl(hsotg->regs + DOEPCTL0));
-	if (g04_dwc2_diag.enumdone <= 8)
-		g04_dwc2_diag_regs(hsotg, "ENUMDONE after EP0");
 }
 
 /**
@@ -2467,25 +2331,7 @@ void s3c_hsotg_core_init_disconnected(struct dwc2_hsotg *hsotg,
 	 * 2.94a driver has a single owner for this operation: it programs the
 	 * full 24-byte SETUP buffer and DMA address, then writes EPENA/CNAK.
 	 */
-	if (g04_dwc2_diag.ep0_arm++ < 8)
-		dev_info(hsotg->dev,
-			 "G324 EP0 arm before queue: CTL=%08x SIZ=%08x "
-			 "DMA=%08x INT=%08x active=%p\n",
-			 readl(hsotg->regs + DOEPCTL0),
-			 readl(hsotg->regs + DOEPTSIZ0),
-			 readl(hsotg->regs + DOEPDMA(0)),
-			 readl(hsotg->regs + DOEPINT(0)), hsotg->eps[0].req);
-
 	s3c_hsotg_enqueue_setup(hsotg);
-
-	if (g04_dwc2_diag.ep0_arm <= 8)
-		dev_info(hsotg->dev,
-			 "G324 EP0 arm after queue: CTL=%08x SIZ=%08x "
-			 "DMA=%08x INT=%08x active=%p\n",
-			 readl(hsotg->regs + DOEPCTL0),
-			 readl(hsotg->regs + DOEPTSIZ0),
-			 readl(hsotg->regs + DOEPDMA(0)),
-			 readl(hsotg->regs + DOEPINT(0)), hsotg->eps[0].req);
 
 	dev_dbg(hsotg->dev, "EP0: DIEPCTL0=0x%08x, DOEPCTL0=0x%08x\n",
 		readl(hsotg->regs + DIEPCTL0),
@@ -2574,9 +2420,6 @@ irq_retry:
 		unsigned int ep;
 		unsigned int timeout;
 
-		if (g04_dwc2_diag.reset++ < 8)
-			g04_dwc2_diag_regs(hsotg, "USBRST before vendor reset");
-
 		dev_dbg(hsotg->dev, "%s: USBRst\n", __func__);
 		dev_dbg(hsotg->dev, "GNPTXSTS=%08x\n",
 			readl(hsotg->regs + GNPTXSTS));
@@ -2616,11 +2459,6 @@ irq_retry:
 					break;
 				udelay(1);
 			}
-			if (timeout == 100 && g04_dwc2_diag.reset <= 8)
-				dev_err(hsotg->dev,
-					"G324 learning queue flush timeout: GRSTCTL=%08x\n",
-					grstctl);
-
 			dcfg = readl(hsotg->regs + DCFG);
 			dcfg &= ~DCFG_DEVADDR_MASK;
 			writel(dcfg, hsotg->regs + DCFG);
@@ -2639,15 +2477,10 @@ irq_retry:
 					  -ECONNRESET, true);
 			writel(0xff, hsotg->regs + DOEPINT(0));
 			s3c_hsotg_enqueue_setup(hsotg);
-			if (g04_dwc2_diag.reset <= 8)
-				g04_dwc2_diag_regs(hsotg,
-						    "USBRST after factory rearm");
 		}
 
 		/* Match 2.94a: acknowledge reset after EP0 is fully armed. */
 		writel(GINTSTS_USBRST, hsotg->regs + GINTSTS);
-		if (g04_dwc2_diag.reset <= 8)
-			g04_dwc2_diag_regs(hsotg, "USBRST after vendor reset");
 	}
 
 	/* check both FIFOs */
@@ -3733,8 +3566,6 @@ int dwc2_gadget_init(struct dwc2_hsotg *hsotg, int irq)
 
 	/* Backport the v4.0 gadget-DMA opt-in for the Meson6 device tree. */
 	hsotg->g_using_dma = of_property_read_bool(dev->of_node, "g-use-dma");
-	dev_info(dev, "G324 gadget buffer DMA: %s\n",
-		 hsotg->g_using_dma ? "enabled" : "disabled");
 
 	/* Set default UTMI width */
 	hsotg->phyif = GUSBCFG_PHYIF16;

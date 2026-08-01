@@ -20,6 +20,50 @@
 
 #include "aml_nftl.h"
 
+/* G328 is an inspection build: keep every NFTL mutation unreachable. */
+static int aml_nftl_readonly_write_page(struct aml_nftl_info_t *aml_nftl_info,
+		addr_blk_t blk_addr, addr_page_t page_addr,
+		unsigned char *data_buf, unsigned char *nftl_oob_buf, int oob_len)
+{
+	(void)aml_nftl_info;
+	(void)blk_addr;
+	(void)page_addr;
+	(void)data_buf;
+	(void)nftl_oob_buf;
+	(void)oob_len;
+	return -EROFS;
+}
+
+static int aml_nftl_readonly_block_op(struct aml_nftl_info_t *aml_nftl_info,
+		addr_blk_t blk_addr)
+{
+	(void)aml_nftl_info;
+	(void)blk_addr;
+	return -EROFS;
+}
+
+static int aml_nftl_readonly_write_sect(struct aml_nftl_info_t *aml_nftl_info,
+		addr_page_t sect_addr, unsigned char *buf)
+{
+	(void)aml_nftl_info;
+	(void)sect_addr;
+	(void)buf;
+	return -EROFS;
+}
+
+static void aml_nftl_readonly_delete_sect(struct aml_nftl_info_t *aml_nftl_info,
+		addr_page_t sect_addr)
+{
+	(void)aml_nftl_info;
+	(void)sect_addr;
+}
+
+static void aml_nftl_readonly_create_structure(
+		struct aml_nftl_info_t *aml_nftl_info)
+{
+	(void)aml_nftl_info;
+}
+
 static int get_vt_node_info(struct aml_nftl_info_t *aml_nftl_info, addr_blk_t blk_addr)
 {
 	addr_blk_t vt_blk_num, phy_blk_num;
@@ -618,14 +662,18 @@ static int aml_nftl_read_sect(struct aml_nftl_info_t *aml_nftl_info, addr_page_t
 
 	if (status == AML_NFTL_FAILURE)
 	{
-		aml_nftl_badblock_handle(aml_nftl_info, phy_blk_addr, logic_blk_addr);
-        return AML_NFTL_FAILURE;
+		pr_warn("G328 NFTL read-only: sector-map read failed for logical "
+			"block %d physical block %d\n",
+			logic_blk_addr, phy_blk_addr);
+	        return AML_NFTL_FAILURE;
 	}
 
 	status = aml_nftl_info->read_page(aml_nftl_info, phy_blk_addr, phy_page_addr, buf, NULL, 0);
 	if (status)
 	{
-		aml_nftl_badblock_handle(aml_nftl_info, phy_blk_addr, logic_blk_addr);
+		pr_warn("G328 NFTL read-only: page read failed for logical "
+			"block %d physical block %d page %d: %d\n",
+			logic_blk_addr, phy_blk_addr, phy_page_addr, status);
 		return status;
 	}
 
@@ -1052,6 +1100,10 @@ int aml_nftl_initialize(struct aml_nftl_blk_t *aml_nftl_blk)
 	uint32_t phys_erase_shift;
 	unsigned char nftl_oob_buf[mtd->oobavail];
 
+	pr_info("G328 NFTL read-only init: mtd=%s size=%llu erase=%u "
+		"write=%u oobavail=%u\n", mtd->name,
+		(unsigned long long)mtd->size, mtd->erasesize,
+		mtd->writesize, mtd->oobavail);
 	if (mtd->oobavail < sizeof(struct nftl_oobinfo_t))
 		return -EPERM;
 	aml_nftl_info = aml_nftl_malloc(sizeof(struct aml_nftl_info_t));
@@ -1092,18 +1144,18 @@ int aml_nftl_initialize(struct aml_nftl_blk_t *aml_nftl_blk)
 		return -ENOMEM;
 
 	aml_nftl_info->read_page = aml_nftl_read_page;
-	aml_nftl_info->write_page = aml_nftl_write_page;
+	aml_nftl_info->write_page = aml_nftl_readonly_write_page;
 	aml_nftl_info->copy_page = aml_nftl_copy_page;
 	aml_nftl_info->get_page_info = aml_nftl_get_page_info;
-	aml_nftl_info->blk_mark_bad = aml_nftl_blk_mark_bad;
+	aml_nftl_info->blk_mark_bad = aml_nftl_readonly_block_op;
 	aml_nftl_info->blk_isbad = aml_nftl_blk_isbad;
 	aml_nftl_info->get_phy_sect_map = aml_nftl_get_phy_sect_map;
-	aml_nftl_info->erase_block = aml_nftl_erase_block;
+	aml_nftl_info->erase_block = aml_nftl_readonly_block_op;
 
 	aml_nftl_info->read_sect = aml_nftl_read_sect;
-	aml_nftl_info->write_sect = aml_nftl_write_sect;
-	aml_nftl_info->delete_sect = aml_nftl_delete_sect;
-	aml_nftl_info->creat_structure = aml_nftl_creat_structure;
+	aml_nftl_info->write_sect = aml_nftl_readonly_write_sect;
+	aml_nftl_info->delete_sect = aml_nftl_readonly_delete_sect;
+	aml_nftl_info->creat_structure = aml_nftl_readonly_create_structure;
 
 	error = aml_nftl_wl_init(aml_nftl_info);
 	if (error)
@@ -1135,8 +1187,8 @@ int aml_nftl_initialize(struct aml_nftl_blk_t *aml_nftl_blk)
 		if (nftl_oob_info->status_page == 0) {
 			aml_nftl_info->accessibleblocks--;
 			phy_blk_node->status_page = STATUS_BAD_BLOCK;
-			aml_nftl_dbg("get status faile at blk: %d \n", phy_blk_num);
-			aml_nftl_info->blk_mark_bad(aml_nftl_info, phy_blk_num);
+			pr_warn("G328 NFTL read-only: invalid status at block %d, skipped\n",
+				phy_blk_num);
 			continue;
 		}
 
@@ -1146,33 +1198,16 @@ int aml_nftl_initialize(struct aml_nftl_blk_t *aml_nftl_blk)
 			aml_nftl_wl->add_erased(aml_nftl_wl, phy_blk_num);
 		}
 		else if ((nftl_oob_info->vtblk < 0) || (nftl_oob_info->vtblk >= (size_in_blk - aml_nftl_info->fillfactor))) {
-			aml_nftl_dbg("nftl invalid vtblk: %d \n", nftl_oob_info->vtblk);
-			error = aml_nftl_info->erase_block(aml_nftl_info, phy_blk_num);
-			if (error) {
-				aml_nftl_info->accessibleblocks--;
-				phy_blk_node->status_page = STATUS_BAD_BLOCK;
-				aml_nftl_info->blk_mark_bad(aml_nftl_info, phy_blk_num);
-			}
-			else {
-				phy_blk_node->valid_sects = 0;
-				aml_nftl_wl->add_erased(aml_nftl_wl, phy_blk_num);
-			}
+			pr_warn("G328 NFTL read-only: invalid vtblk %d at block %d, skipped\n",
+				nftl_oob_info->vtblk, phy_blk_num);
+			continue;
 		}
 		else {
 			if (aml_nftl_info->oobsize >= (sizeof(struct nftl_oobinfo_t) + strlen(AML_NFTL_MAGIC))) {
 				if (memcmp((nftl_oob_buf + sizeof(struct nftl_oobinfo_t)), AML_NFTL_MAGIC, strlen(AML_NFTL_MAGIC))) {
-					aml_nftl_dbg("nftl invalid magic vtblk: %d \n", nftl_oob_info->vtblk);
-					error = aml_nftl_info->erase_block(aml_nftl_info, phy_blk_num);
-					if (error) {
-						aml_nftl_info->accessibleblocks--;
-						phy_blk_node->status_page = STATUS_BAD_BLOCK;
-						aml_nftl_info->blk_mark_bad(aml_nftl_info, phy_blk_num);
-					}
-					else {
-						phy_blk_node->valid_sects = 0;
-						phy_blk_node->ec = 0;
-						aml_nftl_wl->add_erased(aml_nftl_wl, phy_blk_num);
-					}
+					pr_warn("G328 NFTL read-only: invalid magic for vtblk %d "
+						"at block %d, skipped\n",
+						nftl_oob_info->vtblk, phy_blk_num);
 					continue;
 				}
 			}
@@ -1181,14 +1216,17 @@ int aml_nftl_initialize(struct aml_nftl_blk_t *aml_nftl_blk)
 		}
 	}
 
-	aml_nftl_info->isinitialised = 0;
-	aml_nftl_info->cur_split_blk = 0;
+	/* G328 maps existing media only: no conflict cleanup and no GC. */
+	aml_nftl_info->isinitialised = 1;
+	aml_nftl_info->cur_split_blk = aml_nftl_info->accessibleblocks;
 	aml_nftl_wl->gc_start_block = aml_nftl_info->accessibleblocks - 1;
 
-	aml_nftl_check_conflict_node(aml_nftl_info);
-
 	aml_nftl_blk->mbd.size = (aml_nftl_info->accessibleblocks * (mtd->erasesize  >> 9));
-	aml_nftl_dbg("nftl initilize completely dev size: 0x%lx %d\n", aml_nftl_blk->mbd.size * 512, aml_nftl_wl->free_root.count);
+	pr_info("G328 NFTL read-only mapped: sectors=%lu bytes=%llu "
+		"free=%d erased=%d used=%d\n", aml_nftl_blk->mbd.size,
+		(unsigned long long)aml_nftl_blk->mbd.size * 512,
+		aml_nftl_wl->free_root.count, aml_nftl_wl->erased_root.count,
+		aml_nftl_wl->used_root.count);
 
 	/* The sysfs class is diagnostic only; NFTL remains usable without it. */
 	aml_nftl_info->cls.name = kstrdup(AML_NFTL_MAGIC, GFP_KERNEL);

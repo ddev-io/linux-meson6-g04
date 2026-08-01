@@ -366,19 +366,9 @@ static int aml_nftl_write_data(struct aml_nftl_blk_t *aml_nftl_blk, unsigned lon
 
 static int aml_nftl_flush(struct mtd_blktrans_dev *dev)
 {
-	int error = 0;
-	struct mtd_info *mtd = dev->mtd;
-	struct aml_nftl_blk_t *aml_nftl_blk = (void *)dev;
-
-	mutex_lock(&aml_nftl_lock);
-	//aml_nftl_dbg("nftl flush all cache data: %d\n", aml_nftl_blk->cache_buf_cnt);
-	if (aml_nftl_blk->cache_buf_cnt > 0)
-		error = aml_nftl_blk->write_cache_data(aml_nftl_blk, CACHE_CLEAR_ALL);
-
-	mtd_sync(mtd);
-	mutex_unlock(&aml_nftl_lock);
-
-	return error;
+	/* G328 exposes NFTL as a read-only inspection device. */
+	(void)dev;
+	return 0;
 }
 
 /* Request mapping is handled by the Linux 3.19 mtd_blktrans core. */
@@ -518,14 +508,10 @@ static int aml_nftl_readsect(struct mtd_blktrans_dev *dev,
 static int aml_nftl_writesect(struct mtd_blktrans_dev *dev,
 			      unsigned long block, char *buf)
 {
-	struct aml_nftl_blk_t *aml_nftl_blk = (void *)dev;
-	int error;
-
-	mutex_lock(&aml_nftl_lock);
-	error = aml_nftl_blk->write_data(aml_nftl_blk, block, 1, buf);
-	mutex_unlock(&aml_nftl_lock);
-
-	return error;
+	(void)dev;
+	(void)block;
+	(void)buf;
+	return -EROFS;
 }
 
 static int aml_nftl_thread(void *arg)
@@ -655,7 +641,13 @@ static void aml_nftl_add_mtd(struct mtd_blktrans_ops *tr, struct mtd_info *mtd)
 	struct aml_nftl_blk_t *aml_nftl_blk;
 	int error;
 
-	if (mtd->type != MTD_NANDFLASH)
+	pr_info("G328 NFTL add_mtd: name=%s type=%u flags=0x%x "
+		"size=%llu erase=%u write=%u oob=%u\n", mtd->name,
+		mtd->type, mtd->flags, (unsigned long long)mtd->size,
+		mtd->erasesize, mtd->writesize, mtd->oobavail);
+
+	if (mtd->type != MTD_NANDFLASH &&
+	    mtd->type != MTD_MLCNANDFLASH)
 		return;
 
 	if (strcmp(mtd->name, "NFTL_Part"))
@@ -670,16 +662,10 @@ static void aml_nftl_add_mtd(struct mtd_blktrans_ops *tr, struct mtd_info *mtd)
 	aml_nftl_blk->mbd.mtd = mtd;
 	aml_nftl_blk->mbd.devnum = mtd->index;
 	aml_nftl_blk->mbd.tr = tr;
-	aml_nftl_blk->mbd.readonly = !(mtd->flags & MTD_WRITEABLE);
-	aml_nftl_blk->nb.notifier_call = aml_nftl_reboot_notifier;
-
+	aml_nftl_blk->mbd.readonly = 1;
 	INIT_LIST_HEAD(&aml_nftl_blk->cache_list);
 	INIT_LIST_HEAD(&aml_nftl_blk->free_list);
 	aml_nftl_blk->read_data = aml_nftl_read_data;
-	aml_nftl_blk->write_data = aml_nftl_write_data;
-	aml_nftl_blk->write_cache_data = aml_nftl_write_cache_data;
-	aml_nftl_blk->search_cache_list = aml_nftl_search_cache_list;
-	aml_nftl_blk->add_cache_list = aml_nftl_add_cache_list;
 
 	aml_nftl_blk->cache_buf = aml_nftl_malloc(mtd->writesize);
 	if (!aml_nftl_blk->cache_buf)
@@ -687,18 +673,12 @@ static void aml_nftl_add_mtd(struct mtd_blktrans_ops *tr, struct mtd_info *mtd)
 
 	error = aml_nftl_initialize(aml_nftl_blk);
 	if (error) {
-		aml_nftl_dbg("nftl initialization failed: %d\n", error);
+		pr_err("G328 NFTL read-only initialization failed: %d\n", error);
 		goto err_release;
 	}
 
-	aml_nftl_blk->nftl_thread =
-		kthread_run(aml_nftl_thread, aml_nftl_blk, "aml_nftld");
-	if (IS_ERR(aml_nftl_blk->nftl_thread)) {
-		error = PTR_ERR(aml_nftl_blk->nftl_thread);
-		aml_nftl_blk->nftl_thread = NULL;
-		aml_nftl_dbg("nftl thread creation failed: %d\n", error);
-		goto err_release;
-	}
+	/* No background thread: it writes cache data and runs garbage collection. */
+	aml_nftl_blk->nftl_thread = NULL;
 
 	error = add_mtd_blktrans_dev(&aml_nftl_blk->mbd);
 	if (error) {
@@ -706,19 +686,10 @@ static void aml_nftl_add_mtd(struct mtd_blktrans_ops *tr, struct mtd_info *mtd)
 		goto err_stop;
 	}
 
-	error = register_reboot_notifier(&aml_nftl_blk->nb);
-	if (error) {
-		aml_nftl_dbg("nftl reboot notifier failed: %d\n", error);
-		goto err_del;
-	}
-
-	aml_nftl_dbg("aml_nftl_add_mtd ok\n");
-	return;
-
-err_del:
-	aml_nftl_stop_thread(aml_nftl_blk);
-	aml_nftl_blk_release(aml_nftl_blk);
-	del_mtd_blktrans_dev(&aml_nftl_blk->mbd);
+	pr_info("G328 NFTL read-only block device ready: avnftl%u "
+		"sectors=%lu bytes=%llu\n", aml_nftl_blk->mbd.devnum,
+		aml_nftl_blk->mbd.size,
+		(unsigned long long)aml_nftl_blk->mbd.size * 512);
 	return;
 err_stop:
 	aml_nftl_stop_thread(aml_nftl_blk);
@@ -735,19 +706,7 @@ static int aml_nftl_open(struct mtd_blktrans_dev *mbd)
 
 static void aml_nftl_release(struct mtd_blktrans_dev *mbd)
 {
-	struct aml_nftl_blk_t *aml_nftl_blk = (void *)mbd;
-	int error = 0;
-
-	mutex_lock(&aml_nftl_lock);
-	aml_nftl_dbg("nftl release flush cache data: %d\n",
-		     aml_nftl_blk->cache_buf_cnt);
-	if (aml_nftl_blk->cache_buf_cnt > 0)
-		error = aml_nftl_blk->write_cache_data(aml_nftl_blk,
-					       CACHE_CLEAR_ALL);
-	mutex_unlock(&aml_nftl_lock);
-
-	if (error)
-		aml_nftl_dbg("nftl release flush failed: %d\n", error);
+	(void)mbd;
 }
 
 static void aml_nftl_blk_release(struct aml_nftl_blk_t *aml_nftl_blk)
@@ -789,7 +748,6 @@ static void aml_nftl_remove_dev(struct mtd_blktrans_dev *dev)
 {
 	struct aml_nftl_blk_t *aml_nftl_blk = (void *)dev;
 
-	unregister_reboot_notifier(&aml_nftl_blk->nb);
 	aml_nftl_flush(dev);
 	aml_nftl_stop_thread(aml_nftl_blk);
 	aml_nftl_blk_release(aml_nftl_blk);

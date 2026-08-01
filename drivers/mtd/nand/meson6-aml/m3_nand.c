@@ -1520,7 +1520,7 @@ static struct mtd_partition normal_partition_info[] = {
 	{ .name = "boot",      .offset = 136 * SZ_1M,  .size = 32 * SZ_1M },
 	{ .name = "misc",      .offset = 184 * SZ_1M,  .size = 8 * SZ_1M },
 	{ .name = "NFTL_Part", .offset = MTDPART_OFS_APPEND,
-	  .size = MTDPART_SIZ_FULL },
+	  .size = MTDPART_SIZ_FULL, .mask_flags = MTD_WRITEABLE },
 };
 
 static struct aml_nand_platform aml_nand_mid_platform[] = {

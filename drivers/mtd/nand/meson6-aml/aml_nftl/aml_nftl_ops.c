@@ -75,41 +75,17 @@ static int aml_ops_read_page(struct aml_nftl_info_t * aml_nftl_info, addr_blk_t 
 	return ret;
 }
 
-static int aml_ops_write_page(struct aml_nftl_info_t * aml_nftl_info, addr_blk_t blk_addr, addr_page_t page_addr,
-								unsigned char *data_buf, unsigned char *nftl_oob_buf, int oob_len)
+static int aml_ops_readonly_write_page(struct aml_nftl_info_t *aml_nftl_info,
+		addr_blk_t blk_addr, addr_page_t page_addr,
+		unsigned char *data_buf, unsigned char *nftl_oob_buf, int oob_len)
 {
-	struct mtd_info *mtd = aml_nftl_info->mtd;
-	//struct mtd_oob_ops aml_oob_ops;
-	loff_t from;
-	size_t len, retlen;
-	int ret;
-
-	struct mtd_oob_ops *aml_oob_ops;
-	aml_oob_ops = aml_nftl_malloc(sizeof(struct mtd_oob_ops));
-
-	if(aml_oob_ops== NULL){
-		printk("%s,%d malloc failed\n",__func__,__LINE__);
-		return -ENOMEM;;
-	}
-
-	from = mtd->erasesize;
-	from *= blk_addr;
-	from += page_addr * mtd->writesize;
-
-	len = mtd->writesize;
-	aml_oob_ops->mode = MTD_OPS_AUTO_OOB;
-	aml_oob_ops->len = mtd->writesize;
-	aml_oob_ops->ooblen = oob_len;
-	aml_oob_ops->ooboffs = mtd->ecclayout->oobfree[0].offset;
-	aml_oob_ops->datbuf = data_buf;
-	aml_oob_ops->oobbuf = nftl_oob_buf;
-
-	if (nftl_oob_buf)
-		ret = mtd_write_oob(mtd, from, aml_oob_ops);
-	else
-		ret = mtd_write(mtd, from, len, &retlen, data_buf);
-	aml_nftl_free(aml_oob_ops);
-	return ret;
+	(void)aml_nftl_info;
+	(void)blk_addr;
+	(void)page_addr;
+	(void)data_buf;
+	(void)nftl_oob_buf;
+	(void)oob_len;
+	return -EROFS;
 }
 
 static int aml_ops_read_page_oob(struct aml_nftl_info_t *aml_nftl_info, addr_blk_t blk_addr,
@@ -162,29 +138,12 @@ static int aml_ops_blk_isbad(struct aml_nftl_info_t *aml_nftl_info, addr_blk_t b
 	return mtd_block_isbad(mtd, from);
 }
 
-static int aml_ops_blk_mark_bad(struct aml_nftl_info_t *aml_nftl_info, addr_blk_t blk_addr)
+static int aml_ops_readonly_block_op(struct aml_nftl_info_t *aml_nftl_info,
+		addr_blk_t blk_addr)
 {
-	struct mtd_info *mtd = aml_nftl_info->mtd;
-	loff_t from;
-
-	from = mtd->erasesize;
-	from *= blk_addr;
-
-	return mtd_block_markbad(mtd, from);
-}
-
-static int aml_ops_erase_block(struct aml_nftl_info_t * aml_nftl_info, addr_blk_t blk_addr)
-{
-	struct mtd_info *mtd = aml_nftl_info->mtd;
-	struct erase_info aml_nftl_erase_info;
-
-	memset(&aml_nftl_erase_info, 0, sizeof(struct erase_info));
-	aml_nftl_erase_info.mtd = mtd;
-	aml_nftl_erase_info.addr = mtd->erasesize;
-	aml_nftl_erase_info.addr *= blk_addr;
-	aml_nftl_erase_info.len = mtd->erasesize;
-
-	return mtd_erase(mtd, &aml_nftl_erase_info);
+	(void)aml_nftl_info;
+	(void)blk_addr;
+	return -EROFS;
 }
 
 void aml_nftl_ops_init(struct aml_nftl_info_t *aml_nftl_info)
@@ -195,11 +154,11 @@ void aml_nftl_ops_init(struct aml_nftl_info_t *aml_nftl_info)
 
 	aml_nftl_info->aml_nftl_ops = aml_nftl_ops;
 	aml_nftl_ops->read_page = aml_ops_read_page;
-	aml_nftl_ops->write_page = aml_ops_write_page;
+	aml_nftl_ops->write_page = aml_ops_readonly_write_page;
 	aml_nftl_ops->read_page_oob = aml_ops_read_page_oob;
 	aml_nftl_ops->blk_isbad = aml_ops_blk_isbad;
-	aml_nftl_ops->blk_mark_bad = aml_ops_blk_mark_bad;
-	aml_nftl_ops->erase_block = aml_ops_erase_block;
+	aml_nftl_ops->blk_mark_bad = aml_ops_readonly_block_op;
+	aml_nftl_ops->erase_block = aml_ops_readonly_block_op;
 
 	return;
 }
