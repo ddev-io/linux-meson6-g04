@@ -86,7 +86,7 @@ static void g04_dwc2_diag_regs(struct dwc2_hsotg *hsotg,
 				const char *event)
 {
 	dev_info(hsotg->dev,
-		 "G317 %s: GI=%08x/%08x DA=%08x/%08x "
+		 "G318 %s: GI=%08x/%08x DA=%08x/%08x "
 		 "EP0I=%08x/%08x/%08x EP0O=%08x/%08x/%08x state=%u\n",
 		 event, readl(hsotg->regs + GINTSTS),
 		 readl(hsotg->regs + GINTMSK), readl(hsotg->regs + DAINT),
@@ -95,13 +95,13 @@ static void g04_dwc2_diag_regs(struct dwc2_hsotg *hsotg,
 		 readl(hsotg->regs + DOEPINT(0)), readl(hsotg->regs + DOEPCTL0),
 		 readl(hsotg->regs + DOEPTSIZ0), hsotg->ep0_state);
 	dev_info(hsotg->dev,
-		 "G317 %s core: DCTL=%08x DCFG=%08x DSTS=%08x "
+		 "G318 %s core: DCTL=%08x DCFG=%08x DSTS=%08x "
 		 "GOTGCTL=%08x GNPTXSTS=%08x\n",
 		 event, readl(hsotg->regs + DCTL), readl(hsotg->regs + DCFG),
 		 readl(hsotg->regs + DSTS), readl(hsotg->regs + GOTGCTL),
 		 readl(hsotg->regs + GNPTXSTS));
 	dev_info(hsotg->dev,
-		 "G317 %s hw: AHB=%08x USB=%08x RX=%08x NPTX=%08x "
+		 "G318 %s hw: AHB=%08x USB=%08x RX=%08x NPTX=%08x "
 		 "IM=%08x/%08x SNPS=%08x HW=%08x/%08x/%08x DMA0=%08x\n",
 		 event, readl(hsotg->regs + GAHBCFG),
 		 readl(hsotg->regs + GUSBCFG), readl(hsotg->regs + GRXFSIZ),
@@ -780,7 +780,7 @@ static void s3c_hsotg_start_req(struct dwc2_hsotg *hsotg,
 
 	if (index == 0 && g04_dwc2_diag.start++ < 8)
 		dev_info(hsotg->dev,
-			 "G317 start EP0 %s: len=%u packets=%u state=%u "
+			 "G318 start EP0 %s: len=%u packets=%u state=%u "
 			 "CTL=%08x SIZ=%08x req=%p\n",
 			 dir_in ? "IN" : "OUT", length, packets, hsotg->ep0_state,
 			 readl(hsotg->regs + epctrl_reg),
@@ -1181,7 +1181,7 @@ static void s3c_hsotg_process_control(struct dwc2_hsotg *hsotg,
 		 ctrl->wValue, ctrl->wLength);
 	if (g04_dwc2_diag.setup++ < 16)
 		dev_info(hsotg->dev,
-			 "G317 SETUP %02x %02x %04x %04x %04x state=%u\n",
+			 "G318 SETUP %02x %02x %04x %04x %04x state=%u\n",
 			 ctrl->bRequestType, ctrl->bRequest,
 			 le16_to_cpu(ctrl->wValue), le16_to_cpu(ctrl->wIndex),
 			 le16_to_cpu(ctrl->wLength), hsotg->ep0_state);
@@ -1291,7 +1291,7 @@ static void s3c_hsotg_enqueue_setup(struct dwc2_hsotg *hsotg)
 
 	if (g04_dwc2_diag.enqueue++ < 8)
 		dev_info(hsotg->dev,
-			 "G317 enqueue EP0: queued=%u req=%p active=%p "
+			 "G318 enqueue EP0: queued=%u req=%p active=%p "
 			 "state=%u CTL=%08x SIZ=%08x\n",
 			 !list_empty(&hs_req->queue), hs_req, hsotg->eps[0].req,
 			 hsotg->ep0_state, readl(hsotg->regs + DOEPCTL0),
@@ -1597,7 +1597,7 @@ static void s3c_hsotg_handle_rx(struct dwc2_hsotg *hsotg)
 	pktsts = (status & GRXSTS_PKTSTS_MASK) >> GRXSTS_PKTSTS_SHIFT;
 	if (g04_dwc2_diag.rx++ < 32)
 		dev_info(hsotg->dev,
-			 "G317 RX: GRXSTSP=%08x ep=%u sts=%u size=%u "
+			 "G318 RX: GRXSTSP=%08x ep=%u sts=%u size=%u "
 			 "state=%u DOEPINT0=%08x DOEPCTL0=%08x DOEPTSIZ0=%08x\n",
 			 grxstsr, epnum, pktsts, size, hsotg->ep0_state,
 			 readl(hsotg->regs + DOEPINT(0)),
@@ -1649,7 +1649,7 @@ static void s3c_hsotg_handle_rx(struct dwc2_hsotg *hsotg)
 			struct usb_ctrlrequest *ctrl = (void *)hsotg->ctrl_buff;
 
 			dev_info(hsotg->dev,
-				 "G317 SETUPRX data: %02x %02x %04x %04x %04x\n",
+				 "G318 SETUPRX data: %02x %02x %04x %04x %04x\n",
 				 ctrl->bRequestType, ctrl->bRequest,
 				 le16_to_cpu(ctrl->wValue), le16_to_cpu(ctrl->wIndex),
 				 le16_to_cpu(ctrl->wLength));
@@ -1911,7 +1911,7 @@ static void s3c_hsotg_epint(struct dwc2_hsotg *hsotg, unsigned int idx,
 	if (idx == 0 && ((!dir_in && g04_dwc2_diag.ep0_out++ < 32) ||
 			 (dir_in && g04_dwc2_diag.ep0_in++ < 32)))
 		dev_info(hsotg->dev,
-			 "G317 EP0 %s IRQ=%08x CTL=%08x SIZ=%08x "
+			 "G318 EP0 %s IRQ=%08x CTL=%08x SIZ=%08x "
 			 "DAINT=%08x/%08x state=%u req=%p\n",
 			 dir_in ? "IN" : "OUT", ints, ctrl,
 			 readl(hsotg->regs + epsiz_reg),
@@ -2258,9 +2258,9 @@ void s3c_hsotg_core_init_disconnected(struct dwc2_hsotg *hsotg,
 	 * set configuration.
 	 */
 
-	/* set the PLL on, remove the HNP/SRP and set the PHY */
-	writel(hsotg->phyif | GUSBCFG_TOUTCAL(7) |
-	       (0x5 << 10), hsotg->regs + GUSBCFG);
+	/* Match the Meson6 vendor device-mode and 16-bit UTMI timing. */
+	writel(GUSBCFG_FORCEDEVMODE | GUSBCFG_PHYIF16 |
+	       (0x6 << GUSBCFG_USBTRDTIM_SHIFT), hsotg->regs + GUSBCFG);
 
 	s3c_hsotg_init_fifo(hsotg);
 
@@ -2961,9 +2961,9 @@ static void s3c_hsotg_init(struct dwc2_hsotg *hsotg)
 
 	s3c_hsotg_init_fifo(hsotg);
 
-	/* set the PLL on, remove the HNP/SRP and set the PHY */
-	writel(GUSBCFG_PHYIF16 | GUSBCFG_TOUTCAL(7) | (0x5 << 10),
-	       hsotg->regs + GUSBCFG);
+	/* Match the Meson6 vendor device-mode and 16-bit UTMI timing. */
+	writel(GUSBCFG_FORCEDEVMODE | GUSBCFG_PHYIF16 |
+	       (0x6 << GUSBCFG_USBTRDTIM_SHIFT), hsotg->regs + GUSBCFG);
 
 	writel(using_dma(hsotg) ? GAHBCFG_DMA_EN : 0x0,
 	       hsotg->regs + GAHBCFG);
