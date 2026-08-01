@@ -27,8 +27,8 @@
 
 #define MESON6_USB_CTRL_CLK_DETECTED	BIT(8)
 #define MESON6_USB_CTRL_POR		BIT(15)
-#define MESON6_USB_CTRL_FSEL_MASK	GENMASK(22, 20)
-#define MESON6_USB_CTRL_FSEL_12MHZ	(2 << 20)
+#define MESON6_USB_CTRL_FSEL_MASK	GENMASK(24, 22)
+#define MESON6_USB_CTRL_FSEL_12MHZ	(2 << 22)
 
 #define MESON6_RESET1_USB		BIT(2)
 #define MESON6_GCLK_MPEG1_USB0		BIT(21)
@@ -108,7 +108,7 @@ static int meson6_usb2_phy_init(struct phy *phy)
 	if (!(ctrl_b & MESON6_USB_CTRL_CLK_DETECTED))
 		dev_warn(priv->dev, "USB-B PHY clock was not detected\n");
 	dev_info(priv->dev,
-		 "G326 PHY A config=%08x ctrl=%08x B config=%08x ctrl=%08x\n",
+		 "G327 PHY A config=%08x ctrl=%08x B config=%08x ctrl=%08x\n",
 		 config_a, ctrl_a, config_b, ctrl_b);
 
 	priv->initialized = true;
@@ -126,7 +126,7 @@ static int meson6_usb2_phy_exit(struct phy *phy)
 	 * transition differ from the working 3.0.101 lifetime.
 	 */
 	if (priv->initialized)
-		dev_dbg(priv->dev, "G326 keeping Meson6 USB PHY initialized\n");
+		dev_dbg(priv->dev, "G327 keeping Meson6 USB PHY initialized\n");
 
 	return 0;
 }
