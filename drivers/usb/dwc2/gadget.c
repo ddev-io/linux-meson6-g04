@@ -86,7 +86,7 @@ static void g04_dwc2_diag_regs(struct dwc2_hsotg *hsotg,
 				const char *event)
 {
 	dev_info(hsotg->dev,
-		 "G315 %s: GI=%08x/%08x DA=%08x/%08x "
+		 "G316 %s: GI=%08x/%08x DA=%08x/%08x "
 		 "EP0I=%08x/%08x/%08x EP0O=%08x/%08x/%08x state=%u\n",
 		 event, readl(hsotg->regs + GINTSTS),
 		 readl(hsotg->regs + GINTMSK), readl(hsotg->regs + DAINT),
@@ -95,7 +95,7 @@ static void g04_dwc2_diag_regs(struct dwc2_hsotg *hsotg,
 		 readl(hsotg->regs + DOEPINT(0)), readl(hsotg->regs + DOEPCTL0),
 		 readl(hsotg->regs + DOEPTSIZ0), hsotg->ep0_state);
 	dev_info(hsotg->dev,
-		 "G315 %s core: DCTL=%08x DCFG=%08x DSTS=%08x "
+		 "G316 %s core: DCTL=%08x DCFG=%08x DSTS=%08x "
 		 "GOTGCTL=%08x GNPTXSTS=%08x\n",
 		 event, readl(hsotg->regs + DCTL), readl(hsotg->regs + DCFG),
 		 readl(hsotg->regs + DSTS), readl(hsotg->regs + GOTGCTL),
@@ -726,9 +726,8 @@ static void s3c_hsotg_start_req(struct dwc2_hsotg *hsotg,
 
 	dev_dbg(hsotg->dev, "ep0 state:%d\n", hsotg->ep0_state);
 
-	/* For Setup request do not clear NAK */
-	if (!(index == 0 && hsotg->ep0_state == DWC2_EP0_SETUP))
-		ctrl |= DXEPCTL_CNAK;	/* clear NAK set by core */
+	/* Meson6 requires CNAK with EPENA to receive SETUP packets. */
+	ctrl |= DXEPCTL_CNAK;	/* clear NAK set by core */
 
 	dev_dbg(hsotg->dev, "%s: DxEPCTL=0x%08x\n", __func__, ctrl);
 	writel(ctrl, hsotg->regs + epctrl_reg);
@@ -772,7 +771,7 @@ static void s3c_hsotg_start_req(struct dwc2_hsotg *hsotg,
 
 	if (index == 0 && g04_dwc2_diag.start++ < 8)
 		dev_info(hsotg->dev,
-			 "G315 start EP0 %s: len=%u packets=%u state=%u "
+			 "G316 start EP0 %s: len=%u packets=%u state=%u "
 			 "CTL=%08x SIZ=%08x req=%p\n",
 			 dir_in ? "IN" : "OUT", length, packets, hsotg->ep0_state,
 			 readl(hsotg->regs + epctrl_reg),
@@ -1173,7 +1172,7 @@ static void s3c_hsotg_process_control(struct dwc2_hsotg *hsotg,
 		 ctrl->wValue, ctrl->wLength);
 	if (g04_dwc2_diag.setup++ < 16)
 		dev_info(hsotg->dev,
-			 "G315 SETUP %02x %02x %04x %04x %04x state=%u\n",
+			 "G316 SETUP %02x %02x %04x %04x %04x state=%u\n",
 			 ctrl->bRequestType, ctrl->bRequest,
 			 le16_to_cpu(ctrl->wValue), le16_to_cpu(ctrl->wIndex),
 			 le16_to_cpu(ctrl->wLength), hsotg->ep0_state);
@@ -1283,7 +1282,7 @@ static void s3c_hsotg_enqueue_setup(struct dwc2_hsotg *hsotg)
 
 	if (g04_dwc2_diag.enqueue++ < 8)
 		dev_info(hsotg->dev,
-			 "G315 enqueue EP0: queued=%u req=%p active=%p "
+			 "G316 enqueue EP0: queued=%u req=%p active=%p "
 			 "state=%u CTL=%08x SIZ=%08x\n",
 			 !list_empty(&hs_req->queue), hs_req, hsotg->eps[0].req,
 			 hsotg->ep0_state, readl(hsotg->regs + DOEPCTL0),
@@ -1589,7 +1588,7 @@ static void s3c_hsotg_handle_rx(struct dwc2_hsotg *hsotg)
 	pktsts = (status & GRXSTS_PKTSTS_MASK) >> GRXSTS_PKTSTS_SHIFT;
 	if (g04_dwc2_diag.rx++ < 32)
 		dev_info(hsotg->dev,
-			 "G315 RX: GRXSTSP=%08x ep=%u sts=%u size=%u "
+			 "G316 RX: GRXSTSP=%08x ep=%u sts=%u size=%u "
 			 "state=%u DOEPINT0=%08x DOEPCTL0=%08x DOEPTSIZ0=%08x\n",
 			 grxstsr, epnum, pktsts, size, hsotg->ep0_state,
 			 readl(hsotg->regs + DOEPINT(0)),
@@ -1641,7 +1640,7 @@ static void s3c_hsotg_handle_rx(struct dwc2_hsotg *hsotg)
 			struct usb_ctrlrequest *ctrl = (void *)hsotg->ctrl_buff;
 
 			dev_info(hsotg->dev,
-				 "G315 SETUPRX data: %02x %02x %04x %04x %04x\n",
+				 "G316 SETUPRX data: %02x %02x %04x %04x %04x\n",
 				 ctrl->bRequestType, ctrl->bRequest,
 				 le16_to_cpu(ctrl->wValue), le16_to_cpu(ctrl->wIndex),
 				 le16_to_cpu(ctrl->wLength));
@@ -1903,7 +1902,7 @@ static void s3c_hsotg_epint(struct dwc2_hsotg *hsotg, unsigned int idx,
 	if (idx == 0 && ((!dir_in && g04_dwc2_diag.ep0_out++ < 32) ||
 			 (dir_in && g04_dwc2_diag.ep0_in++ < 32)))
 		dev_info(hsotg->dev,
-			 "G315 EP0 %s IRQ=%08x CTL=%08x SIZ=%08x "
+			 "G316 EP0 %s IRQ=%08x CTL=%08x SIZ=%08x "
 			 "DAINT=%08x/%08x state=%u req=%p\n",
 			 dir_in ? "IN" : "OUT", ints, ctrl,
 			 readl(hsotg->regs + epsiz_reg),
