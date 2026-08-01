@@ -82,7 +82,11 @@
 		usb_otg: usb@c9040000 {
 			compatible = "amlogic,meson6-usb", "snps,dwc2";
 			reg = <0xc9040000 0x40000>;
-			interrupts = <0 30 1>;
+			/*
+			 * INT_USB_A is level-high in the working Meson6 vendor kernel.
+			 * GIC SPI 30 is Linux IRQ 62, which its GIC glue special-cases.
+			 */
+			interrupts = <0 30 4>;
 			clocks = <&clk81>;
 			clock-names = "otg";
 			phys = <&usb2_phy>;
