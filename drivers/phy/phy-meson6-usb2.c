@@ -2,8 +2,8 @@
  * Amlogic Meson6 USB2 PHY support
  *
  * The register sequence and clock gates are derived from the GPL Meson6
- * vendor usbclock.c implementation.  This driver deliberately handles only
- * port A, the G04 OTG/device port used by recovery and adb.
+ * vendor usbclock.c implementation.  Although only port A is exposed to the
+ * DWC2 device controller, the shared vendor sequence configures both PHYs.
  */
 
 #include <linux/bitops.h>
@@ -17,6 +17,8 @@
 
 #define MESON6_USB_CONFIG		0x00
 #define MESON6_USB_CTRL			0x04
+#define MESON6_USB_PHY_A_OFFSET		0x00
+#define MESON6_USB_PHY_B_OFFSET		0x20
 
 #define MESON6_USB_CONFIG_CLK_EN	BIT(0)
 #define MESON6_USB_CONFIG_CLK_SEL_MASK	GENMASK(3, 1)
@@ -53,7 +55,9 @@ static void meson6_usb2_update_bits(void __iomem *reg, u32 mask, u32 value)
 static int meson6_usb2_phy_init(struct phy *phy)
 {
 	struct meson6_usb2_phy *priv = phy_get_drvdata(phy);
-	u32 ctrl;
+	void __iomem *phy_a = priv->regs + MESON6_USB_PHY_A_OFFSET;
+	void __iomem *phy_b = priv->regs + MESON6_USB_PHY_B_OFFSET;
+	u32 config_a, config_b, ctrl_a, ctrl_b;
 
 	if (priv->initialized)
 		return 0;
@@ -69,26 +73,43 @@ static int meson6_usb2_phy_init(struct phy *phy)
 				MESON6_RESET1_USB);
 	msleep(500);
 
-	/* XTAL source, divide by one, PHY clock enabled. */
-	meson6_usb2_update_bits(priv->regs + MESON6_USB_CONFIG,
+	/* XTAL source, divide by one, both PHY clocks enabled. */
+	meson6_usb2_update_bits(phy_a + MESON6_USB_CONFIG,
+		MESON6_USB_CONFIG_CLK_EN | MESON6_USB_CONFIG_CLK_SEL_MASK |
+		MESON6_USB_CONFIG_CLK_DIV_MASK,
+		MESON6_USB_CONFIG_CLK_EN | MESON6_USB_CONFIG_CLK_DIV_1);
+	meson6_usb2_update_bits(phy_b + MESON6_USB_CONFIG,
 		MESON6_USB_CONFIG_CLK_EN | MESON6_USB_CONFIG_CLK_SEL_MASK |
 		MESON6_USB_CONFIG_CLK_DIV_MASK,
 		MESON6_USB_CONFIG_CLK_EN | MESON6_USB_CONFIG_CLK_DIV_1);
 
-	/* Select the 12 MHz reference value and pulse PHY POR. */
-	meson6_usb2_update_bits(priv->regs + MESON6_USB_CTRL,
+	/*
+	 * Match the vendor sequence exactly: select the 12 MHz reference and
+	 * assert POR on both PHYs, then release only the device PHY (A).  PHY-B
+	 * remains clocked but held in POR in the working 3.0.101 kernel.
+	 */
+	meson6_usb2_update_bits(phy_b + MESON6_USB_CTRL,
+		MESON6_USB_CTRL_FSEL_MASK | MESON6_USB_CTRL_POR,
+		MESON6_USB_CTRL_FSEL_12MHZ | MESON6_USB_CTRL_POR);
+	meson6_usb2_update_bits(phy_a + MESON6_USB_CTRL,
 		MESON6_USB_CTRL_FSEL_MASK | MESON6_USB_CTRL_POR,
 		MESON6_USB_CTRL_FSEL_12MHZ | MESON6_USB_CTRL_POR);
 	udelay(500);
-	meson6_usb2_update_bits(priv->regs + MESON6_USB_CTRL,
+	meson6_usb2_update_bits(phy_a + MESON6_USB_CTRL,
 		MESON6_USB_CTRL_POR, 0);
 	udelay(500);
 
-	ctrl = readl(priv->regs + MESON6_USB_CTRL);
-	if (!(ctrl & MESON6_USB_CTRL_CLK_DETECTED))
+	config_a = readl(phy_a + MESON6_USB_CONFIG);
+	ctrl_a = readl(phy_a + MESON6_USB_CTRL);
+	config_b = readl(phy_b + MESON6_USB_CONFIG);
+	ctrl_b = readl(phy_b + MESON6_USB_CTRL);
+	if (!(ctrl_a & MESON6_USB_CTRL_CLK_DETECTED))
 		dev_warn(priv->dev, "USB-A PHY clock was not detected\n");
-	else
-		dev_info(priv->dev, "USB-A PHY clock detected\n");
+	if (!(ctrl_b & MESON6_USB_CTRL_CLK_DETECTED))
+		dev_warn(priv->dev, "USB-B PHY clock was not detected\n");
+	dev_info(priv->dev,
+		 "G326 PHY A config=%08x ctrl=%08x B config=%08x ctrl=%08x\n",
+		 config_a, ctrl_a, config_b, ctrl_b);
 
 	priv->initialized = true;
 	return 0;
@@ -98,16 +119,14 @@ static int meson6_usb2_phy_exit(struct phy *phy)
 {
 	struct meson6_usb2_phy *priv = phy_get_drvdata(phy);
 
-	if (!priv->initialized)
-		return 0;
-
-	meson6_usb2_update_bits(priv->regs + MESON6_USB_CTRL,
-				MESON6_USB_CTRL_POR, MESON6_USB_CTRL_POR);
-	meson6_usb2_update_bits(priv->regs + MESON6_USB_CONFIG,
-				MESON6_USB_CONFIG_CLK_EN, 0);
-	meson6_usb2_update_bits(priv->gclk1, MESON6_GCLK_MPEG1_USB0, 0);
-	meson6_usb2_update_bits(priv->gclk2, MESON6_GCLK_MPEG2_USB0_DDR, 0);
-	priv->initialized = false;
+	/*
+	 * The vendor driver leaves both PHY clocks and the shared USB gates on.
+	 * DWC2 calls phy_exit() once after endpoint creation and phy_init() again
+	 * when Android gadget binds; tearing the hardware down here makes that
+	 * transition differ from the working 3.0.101 lifetime.
+	 */
+	if (priv->initialized)
+		dev_dbg(priv->dev, "G326 keeping Meson6 USB PHY initialized\n");
 
 	return 0;
 }

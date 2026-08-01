@@ -65,7 +65,7 @@
 	soc {
 		usb2_phy: phy@c1108400 {
 			compatible = "amlogic,meson6-usb2-phy";
-			reg = <0xc1108400 0x20>,
+			reg = <0xc1108400 0x40>,
 			      <0xc1104408 0x4>,
 			      <0xc1104144 0x4>,
 			      <0xc1104148 0x4>;
