@@ -694,7 +694,7 @@ struct dwc2_hsotg {
 	struct usb_request *ep0_reply;
 	struct usb_request *ctrl_req;
 	u8 ep0_buff[8];
-	u8 ctrl_buff[8];
+	u8 ctrl_buff[24];
 
 	struct usb_gadget gadget;
 	unsigned int enabled:1;
