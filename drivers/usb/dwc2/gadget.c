@@ -78,6 +78,8 @@ struct g04_dwc2_diag_counters {
 	unsigned int ahberr;
 	unsigned int dma_map;
 	unsigned int dma_bounce;
+	unsigned int ep0_arm;
+	unsigned int ep0_active;
 	unsigned int setup;
 	unsigned int enqueue;
 	unsigned int start;
@@ -89,7 +91,7 @@ static void g04_dwc2_diag_regs(struct dwc2_hsotg *hsotg,
 				const char *event)
 {
 	dev_info(hsotg->dev,
-		 "G319 %s: GI=%08x/%08x DA=%08x/%08x "
+		 "G320 %s: GI=%08x/%08x DA=%08x/%08x "
 		 "EP0I=%08x/%08x/%08x EP0O=%08x/%08x/%08x state=%u\n",
 		 event, readl(hsotg->regs + GINTSTS),
 		 readl(hsotg->regs + GINTMSK), readl(hsotg->regs + DAINT),
@@ -98,13 +100,13 @@ static void g04_dwc2_diag_regs(struct dwc2_hsotg *hsotg,
 		 readl(hsotg->regs + DOEPINT(0)), readl(hsotg->regs + DOEPCTL0),
 		 readl(hsotg->regs + DOEPTSIZ0), hsotg->ep0_state);
 	dev_info(hsotg->dev,
-		 "G319 %s core: DCTL=%08x DCFG=%08x DSTS=%08x "
+		 "G320 %s core: DCTL=%08x DCFG=%08x DSTS=%08x "
 		 "GOTGCTL=%08x GNPTXSTS=%08x\n",
 		 event, readl(hsotg->regs + DCTL), readl(hsotg->regs + DCFG),
 		 readl(hsotg->regs + DSTS), readl(hsotg->regs + GOTGCTL),
 		 readl(hsotg->regs + GNPTXSTS));
 	dev_info(hsotg->dev,
-		 "G319 %s hw: AHB=%08x USB=%08x RX=%08x NPTX=%08x "
+		 "G320 %s hw: AHB=%08x USB=%08x RX=%08x NPTX=%08x "
 		 "IM=%08x/%08x SNPS=%08x HW=%08x/%08x/%08x DMA0=%08x\n",
 		 event, readl(hsotg->regs + GAHBCFG),
 		 readl(hsotg->regs + GUSBCFG), readl(hsotg->regs + GRXFSIZ),
@@ -716,6 +718,23 @@ static void s3c_hsotg_start_req(struct dwc2_hsotg *hsotg,
 	/* store the request as the current one we're doing */
 	hs_ep->req = hs_req;
 
+	/*
+	 * EP0 SETUP must not be reprogrammed while DOEPCTL0.EPENA is set.
+	 * The core does not reliably latch a new DOEPTSIZ0/DOEPDMA0 pair in
+	 * that state.  USB reset normally clears EPENA; keep a bounded warning
+	 * so a future trace proves whether that invariant holds.
+	 */
+	if (index == 0 && !dir_in &&
+	    hsotg->ep0_state == DWC2_EP0_SETUP &&
+	    (ctrl & DXEPCTL_EPENA))
+		if (g04_dwc2_diag.ep0_active++ < 8)
+			dev_warn(hsotg->dev,
+				 "G320 EP0 SETUP unexpectedly active before arm: "
+				 "CTL=%08x SIZ=%08x DMA=%08x INT=%08x\n", ctrl,
+				 readl(hsotg->regs + DOEPTSIZ0),
+				 readl(hsotg->regs + DOEPDMA(0)),
+				 readl(hsotg->regs + DOEPINT(0)));
+
 	/* write size / packets */
 	writel(epsize, hsotg->regs + epsize_reg);
 
@@ -731,7 +750,7 @@ static void s3c_hsotg_start_req(struct dwc2_hsotg *hsotg,
 		writel(ureq->dma, hsotg->regs + dma_reg);
 		if (index == 0 && g04_dwc2_diag.dma_map++ < 16)
 			dev_info(hsotg->dev,
-				 "G319 DMA EP0 %s: buf=%p dma=%pad len=%u "
+				 "G320 DMA EP0 %s: buf=%p dma=%pad len=%u "
 				 "reg=%08x\n", dir_in ? "IN" : "OUT",
 				 ureq->buf, &ureq->dma, length,
 				 readl(hsotg->regs + dma_reg));
@@ -744,6 +763,18 @@ static void s3c_hsotg_start_req(struct dwc2_hsotg *hsotg,
 	ctrl |= DXEPCTL_USBACTEP;
 
 	dev_dbg(hsotg->dev, "ep0 state:%d\n", hsotg->ep0_state);
+
+	/*
+	 * The Meson6 DWC OTG 2.94a sequence arms EP0 SETUP only after
+	 * DOEPTSIZ0 and DOEPDMA0 are valid.  Clear stale endpoint status
+	 * immediately before the final EPENA/CNAK write; otherwise an old
+	 * SETUP interrupt can be associated with the newly queued request.
+	 */
+	if (index == 0 && !dir_in &&
+	    hsotg->ep0_state == DWC2_EP0_SETUP) {
+		writel(0xff, hsotg->regs + DOEPINT(0));
+		wmb();
+	}
 
 	/* Meson6 requires CNAK with EPENA to receive SETUP packets. */
 	ctrl |= DXEPCTL_CNAK;	/* clear NAK set by core */
@@ -790,7 +821,7 @@ static void s3c_hsotg_start_req(struct dwc2_hsotg *hsotg,
 
 	if (index == 0 && g04_dwc2_diag.start++ < 8)
 		dev_info(hsotg->dev,
-			 "G319 start EP0 %s: len=%u packets=%u state=%u "
+			 "G320 start EP0 %s: len=%u packets=%u state=%u "
 			 "CTL=%08x SIZ=%08x req=%p\n",
 			 dir_in ? "IN" : "OUT", length, packets, hsotg->ep0_state,
 			 readl(hsotg->regs + epctrl_reg),
@@ -861,7 +892,7 @@ static int s3c_hsotg_handle_unaligned_buf_start(struct dwc2_hsotg *hsotg,
 
 	if (g04_dwc2_diag.dma_bounce++ < 8)
 		dev_info(hsotg->dev,
-			 "G319 DMA bounce %s: %p -> %p len=%u\n",
+			 "G320 DMA bounce %s: %p -> %p len=%u\n",
 			 hs_ep->ep.name, req_buf, hs_req->req.buf,
 			 hs_req->req.length);
 	return 0;
@@ -1250,7 +1281,7 @@ static void s3c_hsotg_process_control(struct dwc2_hsotg *hsotg,
 		 ctrl->wValue, ctrl->wLength);
 	if (g04_dwc2_diag.setup++ < 16)
 		dev_info(hsotg->dev,
-			 "G319 SETUP %02x %02x %04x %04x %04x state=%u\n",
+			 "G320 SETUP %02x %02x %04x %04x %04x state=%u\n",
 			 ctrl->bRequestType, ctrl->bRequest,
 			 le16_to_cpu(ctrl->wValue), le16_to_cpu(ctrl->wIndex),
 			 le16_to_cpu(ctrl->wLength), hsotg->ep0_state);
@@ -1360,7 +1391,7 @@ static void s3c_hsotg_enqueue_setup(struct dwc2_hsotg *hsotg)
 
 	if (g04_dwc2_diag.enqueue++ < 8)
 		dev_info(hsotg->dev,
-			 "G319 enqueue EP0: queued=%u req=%p active=%p "
+			 "G320 enqueue EP0: queued=%u req=%p active=%p "
 			 "state=%u CTL=%08x SIZ=%08x\n",
 			 !list_empty(&hs_req->queue), hs_req, hsotg->eps[0].req,
 			 hsotg->ep0_state, readl(hsotg->regs + DOEPCTL0),
@@ -1667,7 +1698,7 @@ static void s3c_hsotg_handle_rx(struct dwc2_hsotg *hsotg)
 	pktsts = (status & GRXSTS_PKTSTS_MASK) >> GRXSTS_PKTSTS_SHIFT;
 	if (g04_dwc2_diag.rx++ < 32)
 		dev_info(hsotg->dev,
-			 "G319 RX: GRXSTSP=%08x ep=%u sts=%u size=%u "
+			 "G320 RX: GRXSTSP=%08x ep=%u sts=%u size=%u "
 			 "state=%u DOEPINT0=%08x DOEPCTL0=%08x DOEPTSIZ0=%08x\n",
 			 grxstsr, epnum, pktsts, size, hsotg->ep0_state,
 			 readl(hsotg->regs + DOEPINT(0)),
@@ -1719,7 +1750,7 @@ static void s3c_hsotg_handle_rx(struct dwc2_hsotg *hsotg)
 			struct usb_ctrlrequest *ctrl = (void *)hsotg->ctrl_buff;
 
 			dev_info(hsotg->dev,
-				 "G319 SETUPRX data: %02x %02x %04x %04x %04x\n",
+				 "G320 SETUPRX data: %02x %02x %04x %04x %04x\n",
 				 ctrl->bRequestType, ctrl->bRequest,
 				 le16_to_cpu(ctrl->wValue), le16_to_cpu(ctrl->wIndex),
 				 le16_to_cpu(ctrl->wLength));
@@ -1981,7 +2012,7 @@ static void s3c_hsotg_epint(struct dwc2_hsotg *hsotg, unsigned int idx,
 	if (idx == 0 && ((!dir_in && g04_dwc2_diag.ep0_out++ < 32) ||
 			 (dir_in && g04_dwc2_diag.ep0_in++ < 32)))
 		dev_info(hsotg->dev,
-			 "G319 EP0 %s IRQ=%08x CTL=%08x SIZ=%08x "
+			 "G320 EP0 %s IRQ=%08x CTL=%08x SIZ=%08x "
 			 "DAINT=%08x/%08x state=%u req=%p\n",
 			 dir_in ? "IN" : "OUT", ints, ctrl,
 			 readl(hsotg->regs + epsiz_reg),
@@ -2046,7 +2077,7 @@ static void s3c_hsotg_epint(struct dwc2_hsotg *hsotg, unsigned int idx,
 	if (ints & DXEPINT_AHBERR) {
 		if (g04_dwc2_diag.ahberr++ < 16)
 			dev_err(hsotg->dev,
-			"G319 AHBErr ep%u %s: INT=%08x CTL=%08x SIZ=%08x "
+			"G320 AHBErr ep%u %s: INT=%08x CTL=%08x SIZ=%08x "
 			"DMA=%08x AHB=%08x\n", idx, dir_in ? "IN" : "OUT",
 			ints, ctrl, readl(hsotg->regs + epsiz_reg),
 			readl(hsotg->regs +
@@ -2423,25 +2454,34 @@ void s3c_hsotg_core_init_disconnected(struct dwc2_hsotg *hsotg,
 
 	dev_dbg(hsotg->dev, "DCTL=0x%08x\n", readl(hsotg->regs + DCTL));
 
-	/*
-	 * DxEPCTL_USBActEp says RO in manual, but seems to be set by
-	 * writing to the EPCTL register..
-	 */
-
-	/* set to read 1 8byte packet */
-	writel(DXEPTSIZ_MC(1) | DXEPTSIZ_PKTCNT(1) |
-	       DXEPTSIZ_XFERSIZE(8), hsotg->regs + DOEPTSIZ0);
-
-	writel(s3c_hsotg_ep0_mps(hsotg->eps[0].ep.maxpacket) |
-	       DXEPCTL_CNAK | DXEPCTL_EPENA |
-	       DXEPCTL_USBACTEP,
-	       hsotg->regs + DOEPCTL0);
-
 	/* enable, but don't activate EP0in */
 	writel(s3c_hsotg_ep0_mps(hsotg->eps[0].ep.maxpacket) |
 	       DXEPCTL_USBACTEP, hsotg->regs + DIEPCTL0);
 
+	/*
+	 * Do not pre-enable EP0 OUT with an 8-byte transfer here.  The vendor
+	 * 2.94a driver has a single owner for this operation: it programs the
+	 * full 24-byte SETUP buffer and DMA address, then writes EPENA/CNAK.
+	 */
+	if (g04_dwc2_diag.ep0_arm++ < 8)
+		dev_info(hsotg->dev,
+			 "G320 EP0 arm before queue: CTL=%08x SIZ=%08x "
+			 "DMA=%08x INT=%08x active=%p\n",
+			 readl(hsotg->regs + DOEPCTL0),
+			 readl(hsotg->regs + DOEPTSIZ0),
+			 readl(hsotg->regs + DOEPDMA(0)),
+			 readl(hsotg->regs + DOEPINT(0)), hsotg->eps[0].req);
+
 	s3c_hsotg_enqueue_setup(hsotg);
+
+	if (g04_dwc2_diag.ep0_arm <= 8)
+		dev_info(hsotg->dev,
+			 "G320 EP0 arm after queue: CTL=%08x SIZ=%08x "
+			 "DMA=%08x INT=%08x active=%p\n",
+			 readl(hsotg->regs + DOEPCTL0),
+			 readl(hsotg->regs + DOEPTSIZ0),
+			 readl(hsotg->regs + DOEPDMA(0)),
+			 readl(hsotg->regs + DOEPINT(0)), hsotg->eps[0].req);
 
 	dev_dbg(hsotg->dev, "EP0: DIEPCTL0=0x%08x, DOEPCTL0=0x%08x\n",
 		readl(hsotg->regs + DIEPCTL0),
@@ -3636,7 +3676,7 @@ int dwc2_gadget_init(struct dwc2_hsotg *hsotg, int irq)
 
 	/* Backport the v4.0 gadget-DMA opt-in for the Meson6 device tree. */
 	hsotg->g_using_dma = of_property_read_bool(dev->of_node, "g-use-dma");
-	dev_info(dev, "G319 gadget buffer DMA: %s\n",
+	dev_info(dev, "G320 gadget buffer DMA: %s\n",
 		 hsotg->g_using_dma ? "enabled" : "disabled");
 
 	/* Set default UTMI width */
