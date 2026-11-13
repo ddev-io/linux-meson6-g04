@@ -147,6 +147,10 @@ CONFIG_NLS_UTF8=y
 
 # Keep boot/NAND diagnostics, omit unrelated drivers and tracing facilities.
 CONFIG_ANDROID=y
+# Legacy TWRP libcutils/pixelflinger allocates its heap through /dev/ashmem.
+CONFIG_STAGING=y
+CONFIG_ASHMEM=y
+# CONFIG_ANDROID_TIMED_OUTPUT is not set
 CONFIG_ANDROID_RAM_CONSOLE=y
 CONFIG_ANDROID_RAM_CONSOLE_ENABLE_VERBOSE=y
 CONFIG_ANDROID_RAM_CONSOLE_EARLY_INIT=y
@@ -163,7 +167,6 @@ CONFIG_DEBUG_KERNEL=y
 # CONFIG_FTRACE is not set
 # CONFIG_LOCKUP_DETECTOR is not set
 # CONFIG_MAGIC_SYSRQ is not set
-# CONFIG_STAGING is not set
 # CONFIG_HWMON is not set
 # CONFIG_THERMAL is not set
 # CONFIG_NEW_LEDS is not set

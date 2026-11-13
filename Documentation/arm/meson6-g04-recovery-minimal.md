@@ -20,6 +20,9 @@ without loadable modules.
   sysfs, devtmpfs, tmpfs, ext4 and FAT with the existing encodings.
 - Root-shell sockets, TCP support, debugfs, kallsyms, embedded config and
   the early persistent RAM console at `0x8a300000`.
+- Android ashmem, used by the legacy TWRP `libcutils` graphics allocator.
+  Its Kconfig is under STAGING in Linux 3.19, so that menu is enabled;
+  unrelated staging drivers and Android timed output remain disabled.
 
 Meson now explicitly selects PINCTRL. The former multi-platform config
 obtained it indirectly through other platforms, so merely deleting those
@@ -73,13 +76,23 @@ python3 scripts/check-g04-recovery-config.py \
 
 `--baseline /path/to/previous.config` additionally reports the previous
 symbol counts. The checker evaluates Kconfig dependencies and verifies
-49 required built-in symbols, 35 disabled symbols and the CPU/CMA limits.
+51 required built-in symbols, 35 disabled symbols and the CPU/CMA limits.
 It does not invoke make, a compiler, the linker or a device.
 
-For this change the evaluated built-in symbol count fell from 1461 to
-436, and module symbols from 52 to zero. These are configuration counts,
+The initial reduced profile evaluated 436 built-in symbols, down from 1461,
+and zero module symbols, down from 52. These are configuration counts,
 not a measured build-time speedup. No kernel or DTB was built or booted
 for this change.
+
+## First boot observation
+
+The first SD test booted Linux 3.19.8 with root ADB and the Goodix input
+device, with the NAND DT node disabled. TWRP repeatedly exited with
+SIGSEGV before displaying its menu. A core dump places the fault in
+`libcutils` `mspace_malloc` with a NULL heap pointer; that kernel did not
+provide `/dev/ashmem`. The profile now requires ASHMEM so this recovery
+can create its graphics heap. Hardware validation of this correction is
+recorded separately; a successful kernel boot alone does not verify the UI.
 
 The Python parser normalises a doubled line continuation in the inherited
 Intel sound Kconfig only in its read view. The source file is unchanged.
