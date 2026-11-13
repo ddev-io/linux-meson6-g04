@@ -1,3 +1,4 @@
+#include <linux/sizes.h>
 // linux/drivers/amlogic/nand/aml_nand.c
 
 
@@ -1694,7 +1695,7 @@ static int aml_nand_add_partition(struct aml_nand_chip *aml_chip)
 	 */
 	cursor = (u64)(1024 * mtd->writesize / aml_chip->plane_num);
 	good_blocks = 0;
-	while (good_blocks < NAND_MINI_PART_BLOCKNUM) {
+	while (good_blocks < 2) {
 		if (cursor >= mtd->size)
 			return -EINVAL;
 		if (aml_chip->block_status[cursor >> (fls(mtd->erasesize) - 1)]
@@ -1726,7 +1727,7 @@ static int aml_nand_add_partition(struct aml_nand_chip *aml_chip)
 		}
 		parts[i].size = cursor - parts[i].offset;
 	}
-	pr_info("G348 NAND: %u writable stock partitions; no automatic repair\n", nr);
+	pr_info("G349 NAND: %u writable partitions from validated layout; no automatic repair\n", nr);
 	return add_mtd_partitions(mtd, parts, nr);
 }
 
@@ -5572,6 +5573,8 @@ static int aml_nand_env_check(struct mtd_info *mtd)
 	struct mtd_partition *parts = plat->platform_nand_data.chip.partitions;
 	env_t *env;
 	u32 crc, block, value, total;
+	u64 expected_sizes[9];
+	int expanded;
 	unsigned int i, nr = plat->platform_nand_data.chip.nr_partitions;
 	int error;
 
@@ -5599,7 +5602,19 @@ static int aml_nand_env_check(struct mtd_info *mtd)
 		error = -EINVAL;
 		goto out;
 	}
-	/* Require the restored stock table. Do not silently write a new layout. */
+	/* Only these two owner-approved layouts are accepted. */
+	expanded = bbt->aml_nand_part[2].size == 32ULL * SZ_1M &&
+		bbt->aml_nand_part[3].size == 32ULL * SZ_1M &&
+		bbt->aml_nand_part[4].size == 720ULL * SZ_1M;
+	if (!expanded && (bbt->aml_nand_part[2].size != 8ULL * SZ_1M ||
+	    bbt->aml_nand_part[3].size != 8ULL * SZ_1M ||
+	    bbt->aml_nand_part[4].size != 768ULL * SZ_1M)) {
+		error = -EINVAL;
+		goto out;
+	}
+	for (i = 0; i < nr; i++) expected_sizes[i] = parts[i].size;
+	expected_sizes[2] = expected_sizes[3] = (expanded ? 32ULL : 8ULL) * SZ_1M;
+	expected_sizes[4] = (expanded ? 720ULL : 768ULL) * SZ_1M;
 	for (i = 0; i < MAX_MTD_PART_NUM; i++) {
 		struct aml_nand_part_info *part = &bbt->aml_nand_part[i];
 		if (i >= nr) {
@@ -5613,13 +5628,14 @@ static int aml_nand_env_check(struct mtd_info *mtd)
 		    strnlen(part->mtd_part_name, MAX_MTD_PART_NAME_LEN)
 		    == MAX_MTD_PART_NAME_LEN ||
 		    strcmp(part->mtd_part_name, parts[i].name) ||
-		    part->offset != parts[i].offset || part->size != parts[i].size ||
+		    part->offset != parts[i].offset || part->size != expected_sizes[i] ||
 		    part->mask_flags) {
 			pr_err("G348 NAND: restored partition table mismatch at %u\n", i);
 			error = -EINVAL;
 			goto out;
 		}
 	}
+	for (i = 0; i < nr; i++) parts[i].size = expected_sizes[i];
 	total = mtd->size >> (fls(mtd->erasesize) - 1);
 	memset(aml_chip->block_status, NAND_BLOCK_GOOD, total);
 	for (i = 0; i < MAX_BAD_BLK_NUM; i++) {
@@ -5636,7 +5652,8 @@ static int aml_nand_env_check(struct mtd_info *mtd)
 			NAND_FACTORY_BAD : NAND_BLOCK_BAD;
 	}
 	memcpy(&aml_chip->aml_nandenv_info->nand_bbt_info, bbt, sizeof(*bbt));
-	pr_info("G348 NAND: restored env/BBT validated, CRC=0x%08x; no metadata writes\n", crc);
+	pr_info("G349 NAND: validated %s layout, CRC=0x%08x; no metadata writes\n",
+		expanded ? "32/32/720 MiB" : "8/8/768 MiB", crc);
 	error = 0;
 out:
 	kfree(env);
