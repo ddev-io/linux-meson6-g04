@@ -1662,300 +1662,72 @@ static void aml_platform_adjust_timing(struct aml_nand_chip *aml_chip)
 	dev_info(aml_chip->device, "time_mode=%d, bus_cycle=%d, adjust=%d, start_cycle=%d, end_cycle=%d,system=%d.%dns\n",
 		time_mode, bus_cycle, adjust, start_cycle, end_cycle, sys_time/10, sys_time%10);
 }
-static int aml_repair_bbt(struct aml_nand_chip *aml_chip,unsigned int *bad_blk_addr,int cnt)
-{
-	int i, j;
-	struct mtd_info *mtd = &aml_chip->mtd;
-	struct erase_info erase_info_test;
-	int error = 0;
-	struct mtd_oob_ops aml_oob_ops;
-	u8 *data_buf;
-	int phys_erase_shift = fls(mtd->erasesize) - 1;
-	int pages_per_blk = mtd->erasesize / mtd->writesize;
-	int total_blk = (int)(mtd->size >> phys_erase_shift);
-	int test_flag = 0;
-	uint64_t start_blk;
-	  printk("enter repair bbt and total block =%d \n",total_blk);
-	 data_buf = kzalloc(mtd->writesize, GFP_KERNEL);
-	 if(!data_buf) {
-		printk("malloc test buf fail\n");
-		return -ENOMEM;
-	 }
-	  for(i = 0;i < cnt; i++) {
-	if(!((bad_blk_addr[i] > 0)&&(bad_blk_addr[i] < total_blk)))
-		continue;
-	  printk("enter test %d block \n",bad_blk_addr[i]);
-	 start_blk = bad_blk_addr[i];
-	start_blk = start_blk<<phys_erase_shift;
-	memset((unsigned char *)data_buf,bad_blk_addr[i],mtd->writesize);
-	test_flag = 0;
-		aml_chip->block_status[bad_blk_addr[i]] = NAND_BLOCK_GOOD;
-		memset(&erase_info_test, 0, sizeof(struct erase_info));
-		erase_info_test.mtd = mtd;
-		erase_info_test.addr = start_blk ;
-		erase_info_test.len = mtd->erasesize;
 
-		error = mtd_erase(mtd, &erase_info_test);
-		if(error) {
-			printk("BBT REPAIR: erase 0x%llx failed\n", start_blk);
-			aml_chip->block_status[bad_blk_addr[i]] = NAND_BLOCK_BAD;
-			continue;
-		}
-		for(j=0;j<pages_per_blk;j++) {
-		aml_oob_ops.mode = MTD_OPS_AUTO_OOB;
-		aml_oob_ops.len = mtd->writesize;
-		aml_oob_ops.ooblen = sizeof(struct env_oobinfo_t);
-		aml_oob_ops.ooboffs = mtd->ecclayout->oobfree[0].offset;
-		aml_oob_ops.datbuf = data_buf;
-		aml_oob_ops.oobbuf = NULL;
-		error = mtd_write_oob(mtd, start_blk + j * mtd->writesize,
-				      &aml_oob_ops);
-		if (error) {
-			printk("blk check good but write failed: %llx, %d\n", (uint64_t)start_blk, error);
-			aml_chip->block_status[bad_blk_addr[i]] = NAND_BLOCK_BAD;
-			test_flag = 1;
-			break;
-		}
-	    }
-		if(!test_flag) {
-		  for(j=0;j<pages_per_blk;j++) {
-			aml_oob_ops.mode = MTD_OPS_AUTO_OOB;
-			aml_oob_ops.len = mtd->writesize;
-			aml_oob_ops.ooblen = sizeof(struct env_oobinfo_t);
-			aml_oob_ops.ooboffs = mtd->ecclayout->oobfree[0].offset;
-			aml_oob_ops.datbuf = data_buf;
-			aml_oob_ops.oobbuf = NULL;
-			error = mtd_read_oob(mtd, start_blk + j * mtd->writesize,
-					     &aml_oob_ops);
-				if (error) {
-					printk("ecc failed: %llx, %d\n", (uint64_t)start_blk, error);
-					aml_chip->block_status[bad_blk_addr[i]] = NAND_BLOCK_BAD;
-					test_flag = 1;
-					break;
-				}
-		    }
-		}
-		if(!test_flag) {
-		memset(&erase_info_test, 0, sizeof(struct erase_info));
-		erase_info_test.mtd = mtd;
-		erase_info_test.addr = start_blk ;
-		erase_info_test.len = mtd->erasesize;
-		error = mtd_erase(mtd, &erase_info_test);
-			if(error) {
-				printk("BBT REPAIR: erase 0x%llx failed\n", start_blk);
-				aml_chip->block_status[bad_blk_addr[i]] = NAND_BLOCK_BAD;
-				continue;
-			}
-			for (j=0; j<MAX_BAD_BLK_NUM; j++) {
-				if (aml_chip->aml_nandenv_info->nand_bbt_info.nand_bbt[j] == bad_blk_addr[i]) {
-					aml_chip->aml_nandenv_info->nand_bbt_info.nand_bbt[j] = 0;
-					printk("update %d bbt info for %d block in the ram\n",j,bad_blk_addr[i]);
-					break;
-				}
-			}
-		}
-	  }
-	 if(data_buf)
-		kfree(data_buf);
-	printk("###bbt write into nand flash\n");
-	return aml_nand_update_env(mtd);
-}
 static int aml_nand_add_partition(struct aml_nand_chip *aml_chip)
 {
-	uint64_t adjust_offset = 0, mini_part_blk_num, start_blk = 0;
-	uint64_t key_block = 0;
 	struct mtd_info *mtd = &aml_chip->mtd;
 	struct aml_nand_platform *plat = aml_chip->platform;
-	//struct platform_nand_chip *chip = &plat->platform_nand_data.chip;
-#if 1
-	struct mtd_partition *temp_parts = NULL;
-	struct mtd_partition *parts;
-	struct erase_info aml_env_erase_info;
+	struct mtd_partition *parts = plat->platform_nand_data.chip.partitions;
+	u64 cursor, wanted, good_blocks;
+	unsigned int i, nr = plat->platform_nand_data.chip.nr_partitions;
 
-	int nr, i, error = 0, part_save_in_env = 1, file_system_part = 0, phys_erase_shift;
-	u8 part_num = 0;
-	uint64_t erase_length =0;
-	size_t offset;
-	unsigned int bad_blk_addr[128];
-	int bad_block_cnt =0;
-	uint64_t last_size =0;
-	uint64_t mini_part_size = ((mtd->erasesize > NAND_MINI_PART_SIZE) ? mtd->erasesize : NAND_MINI_PART_SIZE);
-
-
-	phys_erase_shift = fls(mtd->erasesize) - 1;
-	parts = plat->platform_nand_data.chip.partitions;
-	nr = plat->platform_nand_data.chip.nr_partitions;
-	if (!strncmp((char*)plat->name, NAND_BOOT_NAME, strlen((const char*)NAND_BOOT_NAME))) {
-		if (nr == 0) {
-			parts = kzalloc(sizeof(struct mtd_partition), GFP_KERNEL);
-			if (!parts)
-				return -ENOMEM;
-		}
+	if (!strncmp(plat->name, NAND_BOOT_NAME, strlen(NAND_BOOT_NAME))) {
+		parts = kzalloc(sizeof(*parts), GFP_KERNEL);
+		if (!parts)
+			return -ENOMEM;
 		parts->name = NAND_BOOT_NAME;
-		parts->offset = 0;
-		parts->size = (mtd->writesize * 1024);
-		nr = 1;
+		parts->size = (u64)mtd->writesize * 1024;
+		/* Keep the encrypted bootloader protected; normal partitions are RW. */
+		parts->mask_flags = MTD_WRITEABLE;
 		nand_boot_flag = 1;
-	}
-	else {
-		if (nand_boot_flag)
-			adjust_offset = (1024 * mtd->writesize / aml_chip->plane_num);
-#ifdef NEW_NAND_SUPPORT
-		if((aml_chip->new_nand_info.type) && (aml_chip->new_nand_info.type < 10))
-			adjust_offset += RETRY_NAND_BLK_NUM* mtd->erasesize;
-#endif
-		part_num++;
-		start_blk = adjust_offset / mtd->erasesize;
-		if ((NAND_MINI_PART_SIZE / mtd->erasesize) < NAND_MINI_PART_BLOCKNUM)
-			mini_part_blk_num = NAND_MINI_PART_BLOCKNUM;
-		else
-			mini_part_blk_num = (NAND_MINI_PART_SIZE >> phys_erase_shift);
-#ifdef CONFIG_AML_NAND_KEY
-
-		key_block = aml_chip->aml_nandkey_info->end_block - aml_chip->aml_nandkey_info->start_block + 1;
-#endif
-
-        start_blk = 0;
-		do {
-			offset = adjust_offset + start_blk * mtd->erasesize;
-			error = mtd->_block_isbad(mtd, offset);
-			if (error) {
-				adjust_offset += mtd->erasesize;
-				continue;
-			}
-			start_blk++;
-		} while (start_blk < mini_part_blk_num);
-		adjust_offset += mini_part_blk_num * mtd->erasesize;
-
-		if (nr == 0) {
-			part_save_in_env = 0;
-			if (nand_boot_flag)
-				nr = NAND_MINI_PART_NUM + 1;
-			else
-				nr = 2;
-			parts = kzalloc((nr * sizeof(struct mtd_partition)), GFP_KERNEL);
-			if (!parts)
-				return -ENOMEM;
-			mini_part_size = ((mtd->erasesize > NAND_MINI_PART_SIZE) ? mtd->erasesize : NAND_MINI_PART_SIZE);
-		}
-
-		for (i=0; i<nr; i++) {
-
-			temp_parts = parts + i;
-			bad_block_cnt =0;
-			memset((unsigned char *)bad_blk_addr,0xff,128*sizeof(int));
-			if ((temp_parts->size >= mtd->erasesize) || (i == (nr - 1)))
-				mini_part_size = temp_parts->size;
-			temp_parts->offset = adjust_offset;
-			if((aml_chip->update_env_flag)&&((mini_part_size > NAND_SYS_PART_SIZE))&&(file_system_part == 0)){
-
-				memset(&aml_env_erase_info, 0, sizeof(struct erase_info));
-				aml_env_erase_info.mtd = mtd;
-				aml_env_erase_info.addr = temp_parts->offset;
-				aml_env_erase_info.len = mtd->erasesize;
-				//erase_length = mtd->size - temp_parts->offset;
-				//erase_length = mtd->size - temp_parts->offset -(key_block+1) * mtd->erasesize;
-                erase_length = mtd->size - temp_parts->offset - key_block * mtd->erasesize;
-
-				for (;aml_env_erase_info.addr < temp_parts->offset + erase_length; aml_env_erase_info.addr += mtd->erasesize){
-
-						error = mtd->_block_isbad(mtd, aml_env_erase_info.addr);
-						if (error){
-							printk("Skipping bad block at 0x%08llx \n",aml_env_erase_info.addr);
-							continue;
-						}
-						#if 0
-						error = mtd->_erase(mtd, &aml_env_erase_info);
-						if (error) {
-							printk("nand erase failed %d\n", error);
-							mtd->_block_markbad(mtd, temp_parts->offset);
-							continue;
-						}
-						#endif
-					}
-				file_system_part = 1;
-				aml_chip->update_env_flag = 0;
-			}
-			if (i < (nr -1)) {
-				start_blk = 0;
-				do {
-					offset = adjust_offset + start_blk * mtd->erasesize;
-					error = mtd->_block_isbad(mtd, offset);
-					if (error == FACTORY_BAD_BLOCK_ERROR) {
-						adjust_offset += mtd->erasesize;
-						continue;
-					}
-					else if(error){
-							if(bad_block_cnt < 128)
-								bad_blk_addr[bad_block_cnt] = offset>> phys_erase_shift;
-						printk("%s:%d find %d bad addr =%d\n",__func__,__LINE__,bad_block_cnt,bad_blk_addr[bad_block_cnt]);
-							bad_block_cnt++;
-						}
-					start_blk++;
-				} while (start_blk < (mini_part_size >> phys_erase_shift));
-				if(mini_part_size > NAND_SYS_PART_SIZE) {
-						if(((bad_block_cnt * 32) > (mini_part_size >> phys_erase_shift))||(bad_block_cnt >10)) {
-							aml_repair_bbt(aml_chip,bad_blk_addr,bad_block_cnt);
-						}
-				}
-			}
-			else{
-				last_size = mtd->size - adjust_offset;
-				start_blk = 0;
-				bad_block_cnt =0;
-				memset((unsigned char *)bad_blk_addr,0xff,128*sizeof(int));
-				do {
-					offset = adjust_offset + start_blk * mtd->erasesize;
-					error = mtd->_block_isbad(mtd, offset);
-					 if(error && (error != FACTORY_BAD_BLOCK_ERROR)){
-							if(bad_block_cnt < 128)
-							bad_blk_addr[bad_block_cnt] = offset>> phys_erase_shift;
-							printk("%s:%d find %d bad addr =%d\n",__func__,__LINE__,bad_block_cnt,bad_blk_addr[bad_block_cnt]);
-							bad_block_cnt++;
-						}
-					start_blk++;
-				} while (start_blk < (last_size >> phys_erase_shift));
-						if(bad_block_cnt >10) {
-							aml_repair_bbt(aml_chip,bad_blk_addr,bad_block_cnt);
-						}
-			}
-			if ((i == (nr - 1)) && (part_save_in_env == 0))
-				temp_parts->size = NAND_SYS_PART_SIZE;
-			else if (mini_part_size != MTDPART_SIZ_FULL)
-				temp_parts->size = mini_part_size + (adjust_offset - temp_parts->offset);
-			adjust_offset += mini_part_size;
-
-			if (temp_parts->name == NULL) {
-				char *part_name;
-
-				part_name = kzalloc(MAX_MTD_PART_NAME_LEN, GFP_KERNEL);
-				if (!part_name)
-					return -ENOMEM;
-				snprintf(part_name, MAX_MTD_PART_NAME_LEN,
-					 "mtd%d", part_num++);
-				temp_parts->name = part_name;
-			}
-		}
-#ifdef CONFIG_AML_NAND_KEY
-		temp_parts = parts + (nr-1);
-		//key_block = aml_chip->aml_nandkey_info->end_block - aml_chip->aml_nandkey_info->start_block + 1;
-
-		if(temp_parts->size == MTDPART_SIZ_FULL){
-			//printk("mtd->size:%llx,temp_parts->offset:%llx,key_block*mtd->erasesize:%x,%s:%d\n",mtd->size,temp_parts->offset,key_block*mtd->erasesize,__func__,__LINE__);
-			temp_parts->size = mtd->size - temp_parts->offset - key_block*mtd->erasesize;
-			//printk("temp_parts->size:%llx,temp_parts->offset:%llx,key_block*mtd->erasesize:%x,%s:%d\n",temp_parts->size,temp_parts->offset,key_block*mtd->erasesize,__func__,__LINE__);
-		}
-		else{
-			temp_parts->size -= key_block*mtd->erasesize;
-			//printk("temp_parts->size:%llx,temp_parts->offset:%llx,key_block*mtd->erasesize:%x,%s:%d\n",temp_parts->size,temp_parts->offset,key_block*mtd->erasesize,__func__,__LINE__);
-		}
-#endif
+		return add_mtd_partitions(mtd, parts, 1);
 	}
 
+	if (!nand_boot_flag || !parts || nr != 9 ||
+	    !aml_chip->aml_nandenv_info ||
+	    !aml_chip->aml_nandenv_info->env_valid)
+		return -EINVAL;
+
+	/* Match the stock mapping: boot copies, then two reserved env blocks.
+	 * Only the CRC-checked BBT is consulted. Never repair or rescan markers.
+	 * All arithmetic remains 64-bit across the 4-GiB boundary.
+	 */
+	cursor = (u64)(1024 * mtd->writesize / aml_chip->plane_num);
+	good_blocks = 0;
+	while (good_blocks < NAND_MINI_PART_BLOCKNUM) {
+		if (cursor >= mtd->size)
+			return -EINVAL;
+		if (aml_chip->block_status[cursor >> (fls(mtd->erasesize) - 1)]
+		    != NAND_FACTORY_BAD)
+			good_blocks++;
+		cursor += mtd->erasesize;
+	}
+
+	for (i = 0; i < nr; i++) {
+		parts[i].offset = cursor;
+		parts[i].mask_flags = 0; /* explicit MTD writes remain available */
+		if (parts[i].size == MTDPART_SIZ_FULL) {
+			if (i != nr - 1 || cursor >= mtd->size)
+				return -EINVAL;
+			parts[i].size = mtd->size - cursor;
+			break;
+		}
+		if (!parts[i].size || (parts[i].size & (mtd->erasesize - 1)))
+			return -EINVAL;
+		wanted = parts[i].size >> (fls(mtd->erasesize) - 1);
+		good_blocks = 0;
+		while (good_blocks < wanted) {
+			if (cursor >= mtd->size)
+				return -EINVAL;
+			if (aml_chip->block_status[cursor >> (fls(mtd->erasesize) - 1)]
+			    != NAND_FACTORY_BAD)
+				good_blocks++;
+			cursor += mtd->erasesize;
+		}
+		parts[i].size = cursor - parts[i].offset;
+	}
+	pr_info("G348 NAND: %u writable stock partitions; no automatic repair\n", nr);
 	return add_mtd_partitions(mtd, parts, nr);
-#else
-	//return add_mtd_device(mtd);
-#endif
 }
 
 static void aml_nand_select_chip(struct mtd_info *mtd, int chipnr)
@@ -2541,7 +2313,7 @@ static int aml_nand_erase_cmd(struct mtd_info *mtd, int page)
 	vt_page_num = (mtd->writesize / (1 << chip->page_shift));
 	vt_page_num *= (1 << pages_per_blk_shift);
 	if (page % vt_page_num)
-		return -EINVAL;
+		return NAND_STATUS_FAIL;
 
 	/* Send commands to erase a block */
 	valid_page_num = (mtd->writesize >> chip->page_shift);
@@ -2763,24 +2535,24 @@ static int aml_nand_read_page_raw(struct mtd_info *mtd, struct nand_chip *chip, 
 
 					aml_chip->aml_nand_command(aml_chip, NAND_CMD_TWOPLANE_READ1, 0x00, page_addr, i);
 					aml_chip->aml_nand_dma_read(aml_chip, aml_chip->aml_nand_data_buf, nand_page_size + nand_oob_size, 0);
-					memcpy(buf, aml_chip->aml_nand_data_buf, (nand_page_size + nand_oob_size));
+					memcpy(buf, aml_chip->aml_nand_data_buf, nand_page_size);
 					memcpy(oob_buf, aml_chip->aml_nand_data_buf + nand_page_size, nand_oob_size);
 
 					oob_buf += nand_oob_size;
-					buf += (nand_page_size + nand_oob_size);
+					buf += nand_page_size;
 
 					aml_chip->aml_nand_command(aml_chip, NAND_CMD_TWOPLANE_READ2, 0x00, page_addr, i);
 					aml_chip->aml_nand_dma_read(aml_chip, aml_chip->aml_nand_data_buf, nand_page_size + nand_oob_size, 0);
-					memcpy(buf, aml_chip->aml_nand_data_buf, (nand_page_size + nand_oob_size));
+					memcpy(buf, aml_chip->aml_nand_data_buf, nand_page_size);
 					memcpy(oob_buf, aml_chip->aml_nand_data_buf + nand_page_size, nand_oob_size);
 
 					oob_buf += nand_oob_size;
-					buf += (nand_page_size + nand_oob_size);
+					buf += nand_page_size;
 				}
 				else if (aml_chip->plane_num == 1) {
 
 					aml_chip->aml_nand_dma_read(aml_chip, aml_chip->aml_nand_data_buf, nand_page_size + nand_oob_size, 0);
-					memcpy(buf, aml_chip->aml_nand_data_buf, (nand_page_size + nand_oob_size));
+					memcpy(buf, aml_chip->aml_nand_data_buf, nand_page_size);
 					memcpy(oob_buf, aml_chip->aml_nand_data_buf + nand_page_size, nand_oob_size);
 
 					oob_buf += nand_oob_size;
@@ -3176,7 +2948,7 @@ dma_retry_plane1:
 	}
 
 exit:
-	return 0;  //do not return error when failed
+	return error;
 }
 
 static int aml_nand_write_page_hwecc(struct mtd_info *mtd, struct nand_chip *chip, const uint8_t *buf,int oob_required)
@@ -3776,57 +3548,9 @@ exit:
 
 static int aml_nand_block_markbad(struct mtd_info *mtd, loff_t ofs)
 {
-	struct nand_chip * chip = mtd->priv;
-	struct aml_nand_chip *aml_chip = mtd_to_nand_chip(mtd);
-	//struct mtd_oob_ops aml_oob_ops;
-	struct mtd_oob_ops  *aml_oob_ops;
-	int blk_addr, mtd_erase_shift, j, ret;
-
-	aml_oob_ops = kzalloc(sizeof(struct mtd_oob_ops), GFP_KERNEL);
-	if (aml_oob_ops == NULL)
-		return -ENOMEM;
-
-	mtd_erase_shift = fls(mtd->erasesize) - 1;
-	blk_addr = (int)(ofs >> mtd_erase_shift);
-	if (aml_chip->block_status != NULL) {
-		if ((aml_chip->block_status[blk_addr] == NAND_BLOCK_BAD)||(aml_chip->block_status[blk_addr] == NAND_FACTORY_BAD)) {
-			if(aml_oob_ops){
-				kfree(aml_oob_ops);
-				aml_oob_ops = NULL;
-			}
-			return 0;
-		}
-		else if (aml_chip->block_status[blk_addr] == NAND_BLOCK_GOOD) {
-			aml_chip->block_status[blk_addr] = NAND_BLOCK_BAD;
-			for (j=0; j<MAX_BAD_BLK_NUM; j++) {
-				if (aml_chip->aml_nandenv_info->nand_bbt_info.nand_bbt[j] == 0) {
-					aml_chip->aml_nandenv_info->nand_bbt_info.nand_bbt[j] = blk_addr;
-					if (aml_nand_update_env(mtd))
-						printk("update env bbt failed %d \n", blk_addr);
-					break;
-				}
-			}
-		}
-	}
-
-	aml_oob_ops->mode = MTD_OPS_AUTO_OOB;
-	aml_oob_ops->len = mtd->writesize;
-	aml_oob_ops->ooblen = mtd->oobavail;
-	aml_oob_ops->ooboffs = chip->ecc.layout->oobfree[0].offset;
-	aml_oob_ops->datbuf = chip->buffers->databuf;
-	aml_oob_ops->oobbuf = chip->oob_poi;
-	chip->pagebuf = -1;
-
-	memset((unsigned char *)aml_oob_ops->datbuf, 0x0, mtd->writesize);
-	memset((unsigned char *)aml_oob_ops->oobbuf, 0x0, aml_oob_ops->ooblen);
-
-	ret = mtd->_write_oob(mtd, ofs, aml_oob_ops);
-
-	if(aml_oob_ops){
-		kfree(aml_oob_ops);
-		aml_oob_ops = NULL;
-	}
-	return ret;
+	/* Preserve the restored BBT and env during driver bring-up. */
+	pr_warn_once("G348 NAND: automatic metadata write blocked\n");
+	return -EROFS;
 }
 
 #ifdef CONFIG_HAS_EARLYSUSPEND
@@ -3919,7 +3643,7 @@ static struct aml_nand_flash_dev *aml_nand_get_flash_type(struct mtd_info *mtd,
 		dev_id[i] = chip->read_byte(mtd);
 	}
 	*maf_id = dev_id[0];
-	pr_info("G330 NAND CE0 ID: %02x %02x %02x %02x %02x %02x\n",
+	pr_info("G348 NAND CE0 ID: %02x %02x %02x %02x %02x %02x\n",
 		dev_id[0], dev_id[1], dev_id[2], dev_id[3], dev_id[4],
 		dev_id[5]);
 
@@ -5056,7 +4780,7 @@ else  if(!strncmp((char*)type->id, (char*)dev_id_sandisk_24nm_8g, strlen((const 
 	chip->pagemask = (chip->chipsize >> chip->page_shift) - 1;
 
 	chip->bbt_erase_shift = chip->phys_erase_shift = ffs(mtd->erasesize) - 1;
-	chip->chip_shift = ffs(chip->chipsize) - 1;
+	chip->chip_shift = fls64(chip->chipsize) - 1;
 
 	/* Set the bad block position */
 	chip->badblockpos = AML_BADBLK_POS;
@@ -5192,7 +4916,7 @@ static int aml_nand_scan_ident(struct mtd_info *mtd, int maxchips)
 		chip->cmdfunc(mtd, NAND_CMD_READID, 0x00, -1);
 		for (j = 0; j < MAX_ID_LEN; j++)
 			ce_id[j] = chip->read_byte(mtd);
-		pr_info("G330 NAND CE%d ID: %02x %02x %02x %02x %02x %02x\n",
+		pr_info("G348 NAND CE%d ID: %02x %02x %02x %02x %02x %02x\n",
 			i, ce_id[0], ce_id[1], ce_id[2], ce_id[3], ce_id[4],
 			ce_id[5]);
 
@@ -5202,7 +4926,7 @@ static int aml_nand_scan_ident(struct mtd_info *mtd, int maxchips)
 		else
 			valid_chip_num ++;
 	}
-	pr_info("G330 NAND detected chips: %d of %d configured\n",
+	pr_info("G348 NAND detected chips: %d of %d configured\n",
 		valid_chip_num, maxchips);
 	if (i > 1) {
 		/*if ((aml_chip->valid_chip[1] == 0) && (aml_chip->valid_chip[2] == 1)) {
@@ -5237,7 +4961,7 @@ static int aml_nand_scan_ident(struct mtd_info *mtd, int maxchips)
 	if (aml_chip->internal_chip_shift != temp_chip_shift) {
 		aml_chip->internal_chip_shift += 1;
 		chip->chip_shift += 1;
-		chip->pagemask = ((1 << (chip->chip_shift + 1)) >> chip->page_shift) - 1;
+		chip->pagemask = ((1ULL << (chip->chip_shift + 1)) >> chip->page_shift) - 1;
 	}
 
 	aml_chip->options = aml_type->options;
@@ -5585,113 +5309,9 @@ exit:
 
 static int aml_nand_save_env(struct mtd_info *mtd, u_char *buf)
 {
-	struct aml_nand_bbt_info *nand_bbt_info;
-	struct env_free_node_t *env_free_node =NULL, *env_tmp_node=NULL;
-	int error = 0, pages_per_blk, i = 1;
-	loff_t addr = 0;
-	//struct erase_info aml_env_erase_info;
-	struct erase_info  *aml_env_erase_info;
-	env_t *env_ptr = (env_t *)buf;
-
-	struct aml_nand_chip *aml_chip = mtd_to_nand_chip(mtd);
-	if (!aml_chip->aml_nandenv_info->env_init)
-		return 1;
-
-	aml_env_erase_info = kzalloc(sizeof(struct erase_info), GFP_KERNEL);
-	if (aml_env_erase_info == NULL){
-		printk("%s %d no mem for aml_env_erase_info\n", __func__, __LINE__);
-		error = -ENOMEM;
-		goto exit;
-	}
-
-	pages_per_blk = mtd->erasesize / mtd->writesize;
-	if ((mtd->writesize < CONFIG_ENV_SIZE) && (aml_chip->aml_nandenv_info->env_valid == 1))
-		i = (CONFIG_ENV_SIZE + mtd->writesize - 1) / mtd->writesize;
-
-	if (aml_chip->aml_nandenv_info->env_valid) {
-		aml_chip->aml_nandenv_info->env_valid_node->phy_page_addr += i;
-		if ((aml_chip->aml_nandenv_info->env_valid_node->phy_page_addr + i) > pages_per_blk) {
-
-			env_free_node = kzalloc(sizeof(struct env_free_node_t), GFP_KERNEL);
-			if (env_free_node == NULL){
-				printk("%s %d no mem for env_free_node\n", __func__, __LINE__);
-				error = -ENOMEM;
-				goto exit;
-			}
-
-
-			env_free_node->phy_blk_addr = aml_chip->aml_nandenv_info->env_valid_node->phy_blk_addr;
-			env_free_node->ec = aml_chip->aml_nandenv_info->env_valid_node->ec;
-			env_tmp_node = aml_chip->aml_nandenv_info->env_free_node;
-			while (env_tmp_node->next != NULL) {
-				env_tmp_node = env_tmp_node->next;
-			}
-			env_tmp_node->next = env_free_node;
-
-			env_tmp_node = aml_chip->aml_nandenv_info->env_free_node;
-			aml_chip->aml_nandenv_info->env_valid_node->phy_blk_addr = env_tmp_node->phy_blk_addr;
-			aml_chip->aml_nandenv_info->env_valid_node->phy_page_addr = 0;
-			aml_chip->aml_nandenv_info->env_valid_node->ec = env_tmp_node->ec;
-			aml_chip->aml_nandenv_info->env_valid_node->timestamp += 1;
-			aml_chip->aml_nandenv_info->env_free_node = env_tmp_node->next;
-			kfree(env_tmp_node);
-		}
-	}
-	else {
-
-		env_tmp_node = aml_chip->aml_nandenv_info->env_free_node;
-		aml_chip->aml_nandenv_info->env_valid_node->phy_blk_addr = env_tmp_node->phy_blk_addr;
-		aml_chip->aml_nandenv_info->env_valid_node->phy_page_addr = 0;
-		aml_chip->aml_nandenv_info->env_valid_node->ec = env_tmp_node->ec;
-		aml_chip->aml_nandenv_info->env_valid_node->timestamp += 1;
-		aml_chip->aml_nandenv_info->env_free_node = env_tmp_node->next;
-		kfree(env_tmp_node);
-	}
-
-	addr = aml_chip->aml_nandenv_info->env_valid_node->phy_blk_addr;
-	addr *= mtd->erasesize;
-	addr += aml_chip->aml_nandenv_info->env_valid_node->phy_page_addr * mtd->writesize;
-	if (aml_chip->aml_nandenv_info->env_valid_node->phy_page_addr == 0) {
-
-		memset(aml_env_erase_info, 0, sizeof(struct erase_info));
-		aml_env_erase_info->mtd = mtd;
-		aml_env_erase_info->addr = addr;
-		aml_env_erase_info->len = mtd->erasesize;
-
-		error = mtd->_erase(mtd, aml_env_erase_info);
-		if (error) {
-			printk("env free blk erase failed %d\n", error);
-			mtd->_block_markbad(mtd, addr);
-			//return error;
-			goto exit;
-		}
-		aml_chip->aml_nandenv_info->env_valid_node->ec++;
-	}
-
-	nand_bbt_info = &aml_chip->aml_nandenv_info->nand_bbt_info;
-	if ((!memcmp(nand_bbt_info->bbt_head_magic, BBT_HEAD_MAGIC, 4)) && (!memcmp(nand_bbt_info->bbt_tail_magic, BBT_TAIL_MAGIC, 4))) {
-		memcpy(env_ptr->data + default_environment_size, aml_chip->aml_nandenv_info->nand_bbt_info.bbt_head_magic, sizeof(struct aml_nand_bbt_info));
-		env_ptr->crc = (crc32((0 ^ 0xffffffffL), env_ptr->data, ENV_SIZE) ^ 0xffffffffL);
-	}
-
-	if (aml_nand_write_env(mtd, addr, (u_char *) env_ptr)) {
-		printk("update nand env FAILED!\n");
-		error = 1;
-		goto exit;
-	}
-
-	kfree(aml_env_erase_info);
-	return error;
-exit:
-	if (aml_env_erase_info) {
-		kfree(aml_env_erase_info);
-		aml_env_erase_info = NULL;
-	}
-	if (env_free_node) {
-		kfree(env_free_node);
-		env_free_node = NULL;
-	}
-	return error;
+	/* Preserve the restored BBT and env during driver bring-up. */
+	pr_warn_once("G348 NAND: automatic metadata write blocked\n");
+	return -EROFS;
 }
 
 static int aml_nand_env_init(struct mtd_info *mtd)
@@ -5925,12 +5545,9 @@ exit:
 		aml_oob_ops = NULL;
 	}
 	if (aml_chip->aml_nandenv_info) {
+		kfree(aml_chip->aml_nandenv_info->env_valid_node);
 		kfree(aml_chip->aml_nandenv_info);
 		aml_chip->aml_nandenv_info = NULL;
-	}
-	if (aml_chip->aml_nandenv_info->env_valid_node ) {
-		kfree(aml_chip->aml_nandenv_info->env_valid_node );
-		aml_chip->aml_nandenv_info->env_valid_node = NULL;
 	}
 	if (env_free_node ) {
 		kfree(env_free_node );
@@ -5942,193 +5559,88 @@ exit:
 
 static int aml_nand_update_env(struct mtd_info *mtd)
 {
-	struct aml_nand_chip *aml_chip = mtd_to_nand_chip(mtd);
-	env_t *env_ptr;
-	loff_t offset;
-	int error = 0;
-
-	env_ptr = kzalloc(sizeof(env_t), GFP_KERNEL);
-	if (env_ptr == NULL)
-		return -ENOMEM;
-
-	if (aml_chip->aml_nandenv_info->env_valid == 1) {
-
-		offset = aml_chip->aml_nandenv_info->env_valid_node->phy_blk_addr;
-		offset *= mtd->erasesize;
-		offset += aml_chip->aml_nandenv_info->env_valid_node->phy_page_addr * mtd->writesize;
-
-		error = aml_nand_read_env (mtd, offset, (u_char *)env_ptr);
-		if (error) {
-			printk("nand env read failed: %llx, %d\n", (uint64_t)offset, error);
-			return error;
-		}
-
-		error = aml_nand_save_env(mtd, (u_char *)env_ptr);
-		if (error) {
-			printk("update env bbt failed %d \n", error);
-			return error;
-		}
-	}
-
-	return error;
+	/* Preserve the restored BBT and env during driver bring-up. */
+	pr_warn_once("G348 NAND: automatic metadata write blocked\n");
+	return -EROFS;
 }
 
 static int aml_nand_env_check(struct mtd_info *mtd)
 {
 	struct aml_nand_chip *aml_chip = mtd_to_nand_chip(mtd);
 	struct aml_nand_platform *plat = aml_chip->platform;
-	//struct platform_nand_chip *chip = &plat->platform_nand_data.chip;
-	struct aml_nand_bbt_info *nand_bbt_info;
-	struct aml_nand_part_info *aml_nand_part;
-	struct mtd_partition *parts;
-	env_t *env_ptr;
-	int error = 0, start_blk, total_blk, i, j, nr, phys_erase_shift;
-	loff_t offset;
-	aml_chip->update_env_flag=0;
+	struct aml_nand_bbt_info *bbt;
+	struct mtd_partition *parts = plat->platform_nand_data.chip.partitions;
+	env_t *env;
+	u32 crc, block, value, total;
+	unsigned int i, nr = plat->platform_nand_data.chip.nr_partitions;
+	int error;
+
+	aml_chip->update_env_flag = 0;
 	error = aml_nand_env_init(mtd);
 	if (error)
 		return error;
-
-	env_ptr = kzalloc(sizeof(env_t), GFP_KERNEL);
-	if (env_ptr == NULL)
+	if (!aml_chip->aml_nandenv_info->env_valid || !parts || nr != 9)
+		return -EINVAL;
+	env = kzalloc(sizeof(*env), GFP_KERNEL);
+	if (!env)
 		return -ENOMEM;
-
-	if (aml_chip->aml_nandenv_info->env_valid == 1) {
-
-		offset = aml_chip->aml_nandenv_info->env_valid_node->phy_blk_addr;
-		offset *= mtd->erasesize;
-		offset += aml_chip->aml_nandenv_info->env_valid_node->phy_page_addr * mtd->writesize;
-
-		error = aml_nand_read_env (mtd, offset, (u_char *)env_ptr);
-		if (error) {
-			printk("nand env read failed: %llx, %d\n", (uint64_t)offset, error);
-			goto exit;
+	error = aml_nand_read_env(mtd, 0, (u_char *)env);
+	if (error)
+		goto out;
+	crc = crc32(~0U, env->data, ENV_SIZE) ^ ~0U;
+	if (crc != env->crc) {
+		pr_err("G348 NAND: env CRC mismatch; metadata left unchanged\n");
+		error = -EBADMSG;
+		goto out;
+	}
+	bbt = (struct aml_nand_bbt_info *)(env->data + default_environment_size);
+	if (memcmp(bbt->bbt_head_magic, BBT_HEAD_MAGIC, 4) ||
+	    memcmp(bbt->bbt_tail_magic, BBT_TAIL_MAGIC, 4)) {
+		error = -EINVAL;
+		goto out;
+	}
+	/* Require the restored stock table. Do not silently write a new layout. */
+	for (i = 0; i < MAX_MTD_PART_NUM; i++) {
+		struct aml_nand_part_info *part = &bbt->aml_nand_part[i];
+		if (i >= nr) {
+			if (!memcmp(part->mtd_part_magic, MTD_PART_MAGIC, 4)) {
+				error = -EINVAL;
+				goto out;
+			}
+			continue;
 		}
-
-		phys_erase_shift = fls(mtd->erasesize) - 1;
-		offset = (1024 * mtd->writesize / aml_chip->plane_num);
-#ifdef NEW_NAND_SUPPORT
-		if((aml_chip->new_nand_info.type) && (aml_chip->new_nand_info.type < 10))
-			offset += RETRY_NAND_BLK_NUM* mtd->erasesize;
-#endif
-		start_blk = (int)(offset >> phys_erase_shift);
-		total_blk = (int)(mtd->size >> phys_erase_shift);
-		nand_bbt_info = (struct aml_nand_bbt_info *)(env_ptr->data + default_environment_size);
-		if ((!memcmp(nand_bbt_info->bbt_head_magic, BBT_HEAD_MAGIC, 4)) && (!memcmp(nand_bbt_info->bbt_tail_magic, BBT_TAIL_MAGIC, 4))) {
-			for (i=start_blk; i<total_blk; i++) {
-				aml_chip->block_status[i] = NAND_BLOCK_GOOD;
-				for (j=0; j<MAX_BAD_BLK_NUM; j++) {
-					if ((nand_bbt_info->nand_bbt[j] &0x7fff)== i) {
-
-						if((nand_bbt_info->nand_bbt[j] &0x8000)) {
-						    aml_chip->block_status[i] = NAND_FACTORY_BAD;
-							//printk("aml_nand_env_check init the block_status factory bbt blk=%d,aml_chip->block_status[%d] =%d\n",i,i,aml_chip->block_status[i]);
-						}
-						else{
-						    aml_chip->block_status[i] = NAND_BLOCK_BAD;
-							//printk("aml_nand_env_check init the block_status bbt blk=%d\n",i);
-						}
-						break;
-					}
-				}
-			}
-
-			//if (chip->set_parts)
-			//	chip->set_parts(mtd->size, chip);
-			aml_nand_part = nand_bbt_info->aml_nand_part;
-			if (plat->platform_nand_data.chip.nr_partitions == 0) {
-				parts = kzalloc((MAX_MTD_PART_NUM * sizeof(struct mtd_partition)), GFP_KERNEL);
-				if (!parts) {
-					error = -ENOMEM;
-					goto exit;
-				}
-				plat->platform_nand_data.chip.partitions = parts;
-				nr = 0;
-				while(memcmp(aml_nand_part->mtd_part_magic, MTD_PART_MAGIC, 4) == 0) {
-					char *part_name;
-
-					part_name = kzalloc(MAX_MTD_PART_NAME_LEN, GFP_KERNEL);
-					if (!part_name) {
-						error = -ENOMEM;
-						goto exit;
-					}
-					strlcpy(part_name, aml_nand_part->mtd_part_name,
-						MAX_MTD_PART_NAME_LEN);
-					parts->name = part_name;
-					parts->offset = aml_nand_part->offset;
-					parts->size = aml_nand_part->size;
-					parts->mask_flags = aml_nand_part->mask_flags;
-					nr++;
-					parts++;
-					aml_nand_part++;
-				}
-				plat->platform_nand_data.chip.nr_partitions = nr;
-			}
-			else {
-				parts = plat->platform_nand_data.chip.partitions;
-				nr = 0;
-				while(memcmp(aml_nand_part->mtd_part_magic, MTD_PART_MAGIC, 4) == 0) {
-					nr++;
-					if (nr > plat->platform_nand_data.chip.nr_partitions) {
-						aml_chip->update_env_flag  = 1;
-						memset((unsigned char *)aml_nand_part, 0, sizeof(struct aml_nand_part_info));
-						aml_nand_part++;
-						continue;
-					}
-
-					if (strcmp(parts->name, aml_nand_part->mtd_part_name)) {
-						printk("mtd parttion %d name %s changed to %s \n", nr, parts->name, aml_nand_part->mtd_part_name);
-						aml_chip->update_env_flag = 1;
-						strncpy(aml_nand_part->mtd_part_name, parts->name, MAX_MTD_PART_NAME_LEN);
-					}
-					if (parts->offset != aml_nand_part->offset) {
-						printk("mtd parttion %d offset %llx changed to %llx \n", nr, aml_nand_part->offset, parts->offset);
-						aml_chip->update_env_flag  = 1;
-						aml_nand_part->offset = parts->offset;
-					}
-					if (parts->size != aml_nand_part->size) {
-						printk("mtd parttion %d size %llx changed to %llx \n", nr, aml_nand_part->size, parts->size);
-						aml_chip->update_env_flag  = 1;
-						aml_nand_part->size = parts->size;
-					}
-					if (parts->mask_flags != aml_nand_part->mask_flags) {
-						printk("mtd parttion %d mask_flags %x changed to %x \n", nr, aml_nand_part->mask_flags, parts->mask_flags);
-						aml_chip->update_env_flag  = 1;
-						aml_nand_part->mask_flags = parts->mask_flags;
-					}
-
-					parts++;
-					aml_nand_part++;
-				}
-				if (nr < plat->platform_nand_data.chip.nr_partitions) {
-					aml_chip->update_env_flag  = 1;
-					for (i=nr; i<plat->platform_nand_data.chip.nr_partitions; i++) {
-						parts = plat->platform_nand_data.chip.partitions + i;
-						aml_nand_part = nand_bbt_info->aml_nand_part + i;
-						memcpy(aml_nand_part->mtd_part_magic, MTD_PART_MAGIC, 4);
-						strncpy(aml_nand_part->mtd_part_name, parts->name, MAX_MTD_PART_NAME_LEN);
-						aml_nand_part->offset = parts->offset;
-						aml_nand_part->size = parts->size;
-						aml_nand_part->mask_flags = parts->mask_flags;
-					}
-				}
-			}
-
-			memcpy((unsigned char *)aml_chip->aml_nandenv_info->nand_bbt_info.bbt_head_magic, (unsigned char *)nand_bbt_info, sizeof(struct aml_nand_bbt_info));
+		if (memcmp(part->mtd_part_magic, MTD_PART_MAGIC, 4) ||
+		    strnlen(part->mtd_part_name, MAX_MTD_PART_NAME_LEN)
+		    == MAX_MTD_PART_NAME_LEN ||
+		    strcmp(part->mtd_part_name, parts[i].name) ||
+		    part->offset != parts[i].offset || part->size != parts[i].size ||
+		    part->mask_flags) {
+			pr_err("G348 NAND: restored partition table mismatch at %u\n", i);
+			error = -EINVAL;
+			goto out;
 		}
 	}
-
-	if (aml_chip->update_env_flag ) {
-		error = aml_nand_save_env(mtd, (u_char *)env_ptr);
-		if (error) {
-			printk("nand env save failed: %d\n", error);
-			goto exit;
+	total = mtd->size >> (fls(mtd->erasesize) - 1);
+	memset(aml_chip->block_status, NAND_BLOCK_GOOD, total);
+	for (i = 0; i < MAX_BAD_BLK_NUM; i++) {
+		value = (u16)bbt->nand_bbt[i];
+		if (!value)
+			continue;
+		block = value & 0x7fff;
+		if (block < 2 || block >= total ||
+		    aml_chip->block_status[block] != NAND_BLOCK_GOOD) {
+			error = -EINVAL;
+			goto out;
 		}
+		aml_chip->block_status[block] = value & 0x8000 ?
+			NAND_FACTORY_BAD : NAND_BLOCK_BAD;
 	}
-
-exit:
-	kfree(env_ptr);
-	return 0;
+	memcpy(&aml_chip->aml_nandenv_info->nand_bbt_info, bbt, sizeof(*bbt));
+	pr_info("G348 NAND: restored env/BBT validated, CRC=0x%08x; no metadata writes\n", crc);
+	error = 0;
+out:
+	kfree(env);
+	return error;
 }
 
 static int aml_nand_scan_bbt(struct mtd_info *mtd)
@@ -6372,7 +5884,7 @@ static ssize_t nand_page_dump(struct class *class,
 
 	memset(&ops, 0, sizeof(ops));
 	ops.datbuf = datbuf;
-	ops.oobbuf = NULL; /* must exist, but oob data will be appended to ops.datbuf */
+	ops.oobbuf = oobbuf;
 	ops.len = mtd->writesize;
 	ops.ooblen = mtd->oobsize;
 	ops.mode = MTD_OPS_RAW;
@@ -6383,6 +5895,8 @@ static ssize_t nand_page_dump(struct class *class,
 		kfree(oobbuf);
 		return 1;
 	}
+	/* The raw-page API returns data and spare bytes in separate buffers. */
+	memcpy(datbuf + mtd->writesize, oobbuf, mtd->oobsize);
 	printk("Page %09llx dump,page size %d:\n", off,mtd->writesize);
 	i = (mtd->writesize + mtd->oobsize) >> 4;
 	p = datbuf;
@@ -6923,7 +6437,7 @@ int aml_nand_init(struct aml_nand_chip *aml_chip)
 	    chip->ecc.mode == NAND_ECC_HW_SYNDROME ||
 	    chip->ecc.mode == NAND_ECC_HW_OOB_FIRST) {
 		chip->ecc.strength = 1;
-		pr_info("G330 NAND ECC: bootstrap strength=1 before ident\n");
+		pr_info("G348 NAND ECC: bootstrap strength=1 before ident\n");
 	}
 
 	/*
@@ -6942,11 +6456,11 @@ int aml_nand_init(struct aml_nand_chip *aml_chip)
 		board_valid_chip[i] = aml_chip->valid_chip[i];
 
 	chip->cmdfunc = aml_nand_ident_command;
-	pr_info("G330 NAND ident: factory single-column command handler active\n");
+	pr_info("G348 NAND ident: factory single-column command handler active\n");
 	err = nand_scan_ident(mtd, 1, NULL);
 	if (err) {
 		dev_err(aml_chip->device,
-			"G330 NAND generic ident bootstrap failed: %d\n", err);
+			"G348 NAND generic ident bootstrap failed: %d\n", err);
 		goto exit_error;
 	}
 
@@ -6960,10 +6474,10 @@ int aml_nand_init(struct aml_nand_chip *aml_chip)
 	err = aml_nand_scan_ident(mtd, aml_chip->chip_num);
 	if (err) {
 		dev_err(aml_chip->device,
-			"G330 NAND vendor ident failed: %d\n", err);
+			"G348 NAND vendor ident failed: %d\n", err);
 		goto exit_error;
 	}
-	pr_info("G330 NAND valid chips: [%u %u %u %u]\n",
+	pr_info("G348 NAND valid chips: [%u %u %u %u]\n",
 		aml_chip->valid_chip[0], aml_chip->valid_chip[1],
 		aml_chip->valid_chip[2], aml_chip->valid_chip[3]);
 
@@ -7025,18 +6539,29 @@ int aml_nand_init(struct aml_nand_chip *aml_chip)
 		}
 	}
 	aml_nand_update_ecc_strength(aml_chip);
-	pr_info("G330 NAND geometry: physical page=%u erase=%u oob=%u "
+	/* Refuse an incomplete CE probe instead of publishing a false capacity. */
+	if (strncmp(plat->name, NAND_BOOT_NAME, strlen(NAND_BOOT_NAME)) &&
+	    (valid_chip_num != 2 || mtd->size != (16ULL << 30) ||
+	     aml_chip->page_size != 8192 || aml_chip->block_size != 2097152 ||
+	     aml_chip->oob_size != 448 || aml_chip->plane_num != 2 ||
+	     mtd->writesize != 32768 || mtd->erasesize != 8388608 ||
+	     mtd->oobsize != 1792 || chip->ecc.strength != 30)) {
+		pr_err("G348 NAND: geometry differs from the verified 16-GiB device\n");
+		err = -ENODEV;
+		goto exit_error;
+	}
+	pr_info("G348 NAND geometry: physical page=%u erase=%u oob=%u "
 		"virtual page=%u erase=%u oob=%u size=%llu\n",
 		aml_chip->page_size, aml_chip->block_size, aml_chip->oob_size,
 		mtd->writesize, mtd->erasesize, mtd->oobsize,
 		(unsigned long long)mtd->size);
-	pr_info("G330 NAND addressing: page_shift=%u phys_erase_shift=%u "
+	pr_info("G348 NAND addressing: page_shift=%u phys_erase_shift=%u "
 		"chip_shift=%u pagemask=0x%x planes=%u configured_chips=%u "
 		"detected_chips=%u internal=%u\n",
 		chip->page_shift, chip->phys_erase_shift, chip->chip_shift,
 		chip->pagemask, aml_chip->plane_num, aml_chip->chip_num,
 		valid_chip_num, aml_chip->internal_chipnr);
-	pr_info("G330 NAND ECC: bch=0x%x strength=%u step=%u bytes=%u "
+	pr_info("G348 NAND ECC: bch=0x%x strength=%u step=%u bytes=%u "
 		"ops=0x%x options=0x%x\n", aml_chip->bch_mode,
 		chip->ecc.strength, chip->ecc.size, chip->ecc.bytes,
 		aml_chip->ops_mode, aml_chip->options);
@@ -7160,7 +6685,7 @@ int aml_nand_init(struct aml_nand_chip *aml_chip)
 	err = nand_scan_tail(mtd);
 	if (err) {
 		dev_err(aml_chip->device,
-			"G330 NAND scan tail failed: %d\n", err);
+			"G348 NAND scan tail failed: %d\n", err);
 		goto exit_error;
 	}
 	mtd->_suspend = aml_nand_suspend;
@@ -7221,7 +6746,7 @@ int aml_nand_init(struct aml_nand_chip *aml_chip)
 
 		err = aml_nand_env_check(mtd);
 		if (err)
-			printk("invalid nand env\n");
+			goto exit_error;
 
 #ifdef CONFIG_AML_NAND_ENV
 			pr_info("nand env: nand_env_probe. \n");

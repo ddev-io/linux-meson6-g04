@@ -293,7 +293,7 @@ static void m3_nand_select_chip(struct aml_nand_chip *aml_chip, int chipnr)
 			if (ce_mask || rb_mask)
 				SET_CBUS_REG_MASK(0x202e, ce_mask | rb_mask);
 			if (ce_mask & BIT(24))
-				pr_info_once("G330 NAND pinmux: CE=0x%08x RB=0x%08x mux2=0x%08x\n",
+				pr_info_once("G348 NAND pinmux: CE=0x%08x RB=0x%08x mux2=0x%08x\n",
 					     ce_mask, rb_mask, READ_CBUS_REG(0x202e));
 			NFC_SEND_CMD_IDLE(aml_chip->chip_selected, 0);
 
@@ -1518,11 +1518,14 @@ ssize_t show_nand_version_info(struct class *class,
 static struct mtd_partition normal_partition_info[] = {
 	{ .name = "logo",      .offset = 72 * SZ_1M,   .size = 8 * SZ_1M },
 	{ .name = "aml_logo",  .offset = 88 * SZ_1M,   .size = 8 * SZ_1M },
-	{ .name = "recovery",  .offset = 104 * SZ_1M,  .size = 16 * SZ_1M },
-	{ .name = "boot",      .offset = 136 * SZ_1M,  .size = 32 * SZ_1M },
-	{ .name = "misc",      .offset = 184 * SZ_1M,  .size = 8 * SZ_1M },
+	{ .name = "recovery",  .offset = 104 * SZ_1M,  .size = 8 * SZ_1M },
+	{ .name = "boot",      .offset = 136 * SZ_1M,  .size = 8 * SZ_1M },
+	{ .name = "system",    .offset = 168 * SZ_1M,  .size = 768 * SZ_1M },
+	{ .name = "factory",   .offset = 936 * SZ_1M,  .size = 128 * SZ_1M },
+	{ .name = "cache",     .offset = 1064 * SZ_1M, .size = 128 * SZ_1M },
+	{ .name = "userdata",  .offset = 1192 * SZ_1M, .size = 2304ULL * SZ_1M },
 	{ .name = "NFTL_Part", .offset = MTDPART_OFS_APPEND,
-	  .size = MTDPART_SIZ_FULL, .mask_flags = MTD_WRITEABLE },
+	  .size = MTDPART_SIZ_FULL },
 };
 
 static struct aml_nand_platform aml_nand_mid_platform[] = {

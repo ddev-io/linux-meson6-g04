@@ -1675,7 +1675,8 @@ read_retry:
 		/* For subsequent reads align to page boundary */
 		col = 0;
 		/* Increment page address */
-		realpage++;
+		/* One Amlogic virtual page can span multiple physical pages. */
+		realpage += mtd->writesize >> chip->page_shift;
 
 		page = realpage & chip->pagemask;
 		/* Check, if we cross a chip boundary */
@@ -1898,8 +1899,9 @@ static int nand_do_read_oob(struct mtd_info *mtd, loff_t from,
 
 	/* Do not allow reads past end of device */
 	if (unlikely(from >= mtd->size ||
-		     ops->ooboffs + readlen > ((mtd->size >> chip->page_shift) -
-					(from >> chip->page_shift)) * len)) {
+		     ops->ooboffs + readlen >
+			((mtd->size >> (fls(mtd->writesize) - 1)) -
+			 (from >> (fls(mtd->writesize) - 1))) * len)) {
 		pr_debug("%s: attempt to read beyond end of device\n",
 				__func__);
 		return -EINVAL;
@@ -1937,7 +1939,8 @@ static int nand_do_read_oob(struct mtd_info *mtd, loff_t from,
 			break;
 
 		/* Increment page address */
-		realpage++;
+		/* One Amlogic virtual page can span multiple physical pages. */
+		realpage += mtd->writesize >> chip->page_shift;
 
 		page = realpage & chip->pagemask;
 		/* Check, if we cross a chip boundary */
@@ -2466,7 +2469,8 @@ static int nand_do_write_ops(struct mtd_info *mtd, loff_t to,
 
 		column = 0;
 		buf += bytes;
-		realpage++;
+		/* One Amlogic virtual page can span multiple physical pages. */
+		realpage += mtd->writesize >> chip->page_shift;
 
 		page = realpage & chip->pagemask;
 		/* Check, if we cross a chip boundary */
@@ -2586,8 +2590,8 @@ static int nand_do_write_oob(struct mtd_info *mtd, loff_t to,
 	/* Do not allow write past end of device */
 	if (unlikely(to >= mtd->size ||
 		     ops->ooboffs + ops->ooblen >
-			((mtd->size >> chip->page_shift) -
-			 (to >> chip->page_shift)) * len)) {
+			((mtd->size >> (fls(mtd->writesize) - 1)) -
+			 (to >> (fls(mtd->writesize) - 1))) * len)) {
 		pr_debug("%s: attempt to write beyond end of device\n",
 				__func__);
 		return -EINVAL;
@@ -2735,7 +2739,7 @@ int nand_erase_nand(struct mtd_info *mtd, struct erase_info *instr,
 	chipnr = (int)(instr->addr >> chip->chip_shift);
 
 	/* Calculate pages in each block */
-	pages_per_block = 1 << (chip->phys_erase_shift - chip->page_shift);
+	pages_per_block = mtd->erasesize >> chip->page_shift;
 
 	/* Select the NAND device */
 	chip->select_chip(mtd, chipnr);
@@ -2792,7 +2796,7 @@ int nand_erase_nand(struct mtd_info *mtd, struct erase_info *instr,
 		}
 
 		/* Increment page address and decrement length */
-		len -= (1ULL << chip->phys_erase_shift);
+		len -= mtd->erasesize;
 		page += pages_per_block;
 
 		/* Check, if we cross a chip boundary */

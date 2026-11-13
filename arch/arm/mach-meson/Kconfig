@@ -3,6 +3,7 @@ menuconfig ARCH_MESON
 	select GENERIC_IRQ_CHIP
 	select ARM_GIC
 	select CACHE_L2X0
+	select PINCTRL
 
 if ARCH_MESON
 
