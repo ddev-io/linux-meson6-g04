@@ -8,6 +8,14 @@ Required properties:
 - power-gpios: GPIO controlling touchscreen power
 - reset-gpios: active-low reset GPIO
 
+Optional board orientation properties:
+- touchscreen-swapped-x-y: exchange raw sensor axes
+- touchscreen-inverted-x: invert panel X after exchanging axes
+- touchscreen-inverted-y: invert panel Y after exchanging axes
+
+The G04 panel is 1280x800. Its portrait-mounted sensor uses all three
+properties, matching the working vendor-kernel board calibration.
+
 Example:
 
 	touchscreen@5d {
@@ -18,4 +26,7 @@ Example:
 		interrupt-gpios = <&gpio_a 16 0>;
 		power-gpios = <&gpio_a 23 0>;
 		reset-gpios = <&gpio_c 3 0>;
+		touchscreen-swapped-x-y;
+		touchscreen-inverted-x;
+		touchscreen-inverted-y;
 	};

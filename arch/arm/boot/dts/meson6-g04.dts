@@ -178,5 +178,9 @@
 		interrupt-gpios = <&gpio_a 16 0>;
 		power-gpios = <&gpio_a 23 0>;
 		reset-gpios = <&gpio_c 3 0>;
+		/* Same sensor-to-panel calibration as the working vendor kernel. */
+		touchscreen-swapped-x-y;
+		touchscreen-inverted-x;
+		touchscreen-inverted-y;
 	};
 };
