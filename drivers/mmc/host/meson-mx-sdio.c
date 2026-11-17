@@ -107,6 +107,7 @@
 
 struct meson_mx_mmc_host {
 	struct device			*controller_dev;
+	bool				meson6;
 
 	struct clk			*parent_clk;
 	struct clk			*core_clk;
@@ -232,12 +233,27 @@ static void meson_mx_mmc_start_cmd(struct mmc_host *mmc,
 	send |= FIELD_PREP(MESON_MX_SDIO_SEND_COMMAND_INDEX_MASK,
 			   (0x40 | cmd->opcode));
 
+	if (host->meson6)
+		send |= MESON_MX_SDIO_SEND_USE_INT_WINDOW;
+
 	spin_lock_irqsave(&host->irq_lock, irqflags);
+
+	/* Match the Meson6 vendor command reset and timeout-window sequence. */
+	if (host->meson6) {
+		meson_mx_mmc_soft_reset(host);
+		writel(MESON_MX_SDIO_IRQS_TIMING_OUT_COUNT_MASK |
+		       MESON_MX_SDIO_IRQS_TIMING_OUT_INT |
+		       MESON_MX_SDIO_IRQS_CMD_INT | MESON_MX_SDIO_IRQS_IF_INT,
+		       host->base + MESON_MX_SDIO_IRQS);
+	}
 
 	mult = readl(host->base + MESON_MX_SDIO_MULT);
 	mult &= ~MESON_MX_SDIO_MULT_PORT_SEL_MASK;
 	mult |= FIELD_PREP(MESON_MX_SDIO_MULT_PORT_SEL_MASK, host->slot_id);
-	mult |= BIT(31);
+	if (host->meson6)
+		mult &= ~BIT(31);
+	else
+		mult |= BIT(31);
 	writel(mult, host->base + MESON_MX_SDIO_MULT);
 
 	/* enable the CMD done interrupt */
@@ -252,11 +268,10 @@ static void meson_mx_mmc_start_cmd(struct mmc_host *mmc,
 
 	writel(cmd->arg, host->base + MESON_MX_SDIO_ARGU);
 	writel(ext, host->base + MESON_MX_SDIO_EXT);
+	mod_timer(&host->cmd_timeout, jiffies + timeout);
 	writel(send, host->base + MESON_MX_SDIO_SEND);
 
 	spin_unlock_irqrestore(&host->irq_lock, irqflags);
-
-	mod_timer(&host->cmd_timeout, jiffies + timeout);
 }
 
 static void meson_mx_mmc_request_done(struct meson_mx_mmc_host *host)
@@ -666,6 +681,8 @@ static int meson_mx_mmc_probe(struct platform_device *pdev)
 	host = mmc_priv(mmc);
 	host->mmc = mmc;
 	host->controller_dev = &pdev->dev;
+	host->meson6 = of_device_is_compatible(pdev->dev.of_node,
+					       "amlogic,meson6-sdio");
 
 	spin_lock_init(&host->irq_lock);
 	setup_timer(&host->cmd_timeout, meson_mx_mmc_timeout, (unsigned long)host);
@@ -683,7 +700,7 @@ static int meson_mx_mmc_probe(struct platform_device *pdev)
 	ret = devm_request_threaded_irq(host->controller_dev, irq,
 					meson_mx_mmc_irq,
 					meson_mx_mmc_irq_thread, IRQF_ONESHOT,
-					NULL, host);
+					dev_name(host->controller_dev), host);
 	if (ret)
 		goto error_free_mmc;
 

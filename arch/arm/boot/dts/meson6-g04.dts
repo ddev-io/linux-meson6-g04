@@ -43,8 +43,7 @@
 		regulator-min-microvolt = <3300000>;
 		regulator-max-microvolt = <3300000>;
 		gpio = <&gpio_sd 31 0>;
-		regulator-boot-on;
-		startup-delay-us = <1000>;
+		startup-delay-us = <200000>;
 	};
 
 	memory {
