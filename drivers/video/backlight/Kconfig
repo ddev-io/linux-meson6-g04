@@ -444,3 +444,9 @@ config BACKLIGHT_BD6107
 endif # BACKLIGHT_CLASS_DEVICE
 
 endif # BACKLIGHT_LCD_SUPPORT
+
+config BACKLIGHT_MESON6_G04
+	tristate "Meson6 G04 panel backlight"
+	depends on MACH_MESON6 && OF && BACKLIGHT_CLASS_DEVICE
+	help
+	  Control the G04 panel backlight through the firmware's PWM_D route.

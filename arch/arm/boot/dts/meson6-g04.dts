@@ -142,12 +142,38 @@
 			};
 		};
 
+		g04_ao_pinmux: pinmux@c8100014 {
+			compatible = "pinctrl-single";
+			reg = <0xc8100014 0x4>;
+			pinctrl-single,register-width = <32>;
+			pinctrl-single,function-mask = <1>;
+			pinctrl-single,bit-per-mux;
+
+			i2c_ao_pins: i2c-ao-pins {
+				/* Vendor AO I2C master MUX[6:5], clear alternates. */
+				pinctrl-single,bits = <0x0 0x00000060 0x01800066>;
+			};
+		};
+
+		backlight@c1108654 {
+			compatible = "ddev-io,meson6-g04-backlight";
+			reg = <0xc1108654 0x8>;
+			pinctrl-names = "default";
+			pinctrl-0 = <&backlight_pwm_pins>;
+		};
+
 		g04_pinmux: pinmux@c11080b0 {
 			compatible = "pinctrl-single";
 			reg = <0xc11080b0 0x20>;
 			pinctrl-single,register-width = <32>;
 			pinctrl-single,function-mask = <1>;
 			pinctrl-single,bit-per-mux;
+
+			backlight_pwm_pins: backlight-pwm-pins {
+				/* Firmware routes PWM_D to GPIOD_1, not LED_BL_PWM. */
+				pinctrl-single,bits = <0x04 0 0x10000000>,
+						      <0x08 0x00000008 0x00000008>;
+			};
 
 			sdio_b_pins: sdio-b-pins {
 				/* Vendor SDIO port B uses CARD_0..5, MUX2[15:10]. */
@@ -227,5 +253,17 @@
 		touchscreen-swapped-x-y;
 		touchscreen-inverted-x;
 		touchscreen-inverted-y;
+	};
+};
+
+&i2c_AO {
+	clock-frequency = <100000>;
+	pinctrl-names = "default";
+	pinctrl-0 = <&i2c_ao_pins>;
+	status = "okay";
+
+	battery@34 {
+		compatible = "ddev-io,meson6-g04-axp20-battery";
+		reg = <0x34>;
 	};
 };

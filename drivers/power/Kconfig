@@ -402,3 +402,9 @@ source "drivers/power/reset/Kconfig"
 endif # POWER_SUPPLY
 
 source "drivers/power/avs/Kconfig"
+
+config BATTERY_MESON6_G04
+	tristate "Meson6 G04 AXP20x battery telemetry"
+	depends on MACH_MESON6 && OF && I2C && POWER_SUPPLY
+	help
+	  Read battery capacity and charging status from the G04 PMIC.
