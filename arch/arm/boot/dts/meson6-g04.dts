@@ -6,6 +6,10 @@
 	model = "Amlogic AML8726-MX G04 / VB100a Pro";
 	compatible = "ddev-io,meson6-g04", "amlogic,meson6";
 
+	cpus {
+		enable-method = "ddev-io,meson6-g04-smp";
+	};
+
 	aliases {
 		serial0 = &uart_A;
 		display0 = &framebuffer0;
@@ -48,19 +52,10 @@
 
 	memory {
 		device_type = "memory";
-		/*
-		 * The vendor G04 video/reserved window remains outside Linux RAM.
-		 * Recovery does not register the vendor deinterlace device, so its
-		 * first MiB at 0x8a300000 is used for the diagnostic ram_console.
-		 */
+		/* Keep the vendor video window outside Linux RAM. */
 		reg = <0x80000000 0x04000000>,
 		      <0x90d00000 0x0f200000>,
 		      <0xa0000000 0x20000000>;
-	};
-
-	ram_console: ram-console@8a300000 {
-		compatible = "google,ram-console";
-		reg = <0x8a300000 0x00100000>;
 	};
 
 	chosen {
@@ -69,7 +64,7 @@
 		ranges;
 
 		stdout-path = &uart_A;
-		bootargs = "console=ttyAML0,115200n8 earlyprintk";
+		bootargs = "console=ttyAML0,115200n8";
 
 		/* U-Boot/vendor VPU keeps scanning this OSD1 buffer. */
 		framebuffer0: framebuffer@84100000 {
