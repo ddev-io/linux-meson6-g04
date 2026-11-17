@@ -12,11 +12,11 @@
 #define G04_PWM_D_CLK_ENABLE	BIT(23)
 #define G04_BL_MAX		255
 #define G04_BL_DEFAULT		128
-/* 24 MHz oscillator, divider 0: 400 Hz with 30% to 80% duty. */
+/* 24 MHz oscillator, divider 0: 400 Hz, 12% to 42% duty over the panel's useful range. */
 #define G04_PWM_D_CLK_MASK	((0x7f << 16) | (3 << 6))
 #define G04_BL_PERIOD		60000
-#define G04_BL_DUTY_MIN		(G04_BL_PERIOD * 3 / 10)
-#define G04_BL_DUTY_MAX		(G04_BL_PERIOD * 8 / 10)
+#define G04_BL_DUTY_MIN		(G04_BL_PERIOD * 12 / 100)
+#define G04_BL_DUTY_MAX		(G04_BL_PERIOD * 42 / 100)
 
 struct g04_backlight {
 	void __iomem *pwm;
