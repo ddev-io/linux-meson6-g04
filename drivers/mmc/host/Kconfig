@@ -753,3 +753,9 @@ config MMC_TOSHIBA_PCI
 	tristate "Toshiba Type A SD/MMC Card Interface Driver"
 	depends on PCI
 	help
+
+config MMC_MESON_MX_SDIO
+	tristate "Amlogic Meson MX SDIO/MMC controller"
+	depends on ARCH_MESON && OF
+	help
+	  Meson6/Meson8 SDIO controller, backported from Linux v4.15.

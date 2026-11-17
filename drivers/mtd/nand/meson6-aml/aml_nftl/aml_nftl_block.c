@@ -652,14 +652,7 @@ static void aml_nftl_add_mtd(struct mtd_blktrans_ops *tr, struct mtd_info *mtd)
 
 	if (strcmp(mtd->name, "NFTL_Part"))
 		return;
-	/*
-	 * G330 validates only physical NAND identification and geometry.  Do not
-	 * scan NFTL metadata or register a block device until both chip-enables
-	 * have been confirmed on hardware.
-	 */
-	pr_info("G330 NFTL registration intentionally skipped for %s\n",
-		mtd->name);
-	return;
+	/* Map existing NFTL media read-only; no format, writes or GC. */
 
 	aml_nftl_blk = aml_nftl_malloc(sizeof(*aml_nftl_blk));
 	if (!aml_nftl_blk)

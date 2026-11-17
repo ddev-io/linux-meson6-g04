@@ -30,6 +30,23 @@
 		regulator-always-on;
 	};
 
+	sdio_core_clk: clock@c1104140 {
+		compatible = "ddev-io,g04-sdio-gate";
+		reg = <0xc1104140 0x4>;
+		#clock-cells = <0>;
+		clocks = <&clk81>;
+	};
+
+	sd_vmmc: regulator-sdcard {
+		compatible = "regulator-fixed";
+		regulator-name = "sdcard-vmmc";
+		regulator-min-microvolt = <3300000>;
+		regulator-max-microvolt = <3300000>;
+		gpio = <&gpio_sd 31 0>;
+		regulator-boot-on;
+		startup-delay-us = <1000>;
+	};
+
 	memory {
 		device_type = "memory";
 		/*
@@ -102,12 +119,46 @@
 			status = "okay";
 		};
 
+		gpio_sd: gpio@c110806c {
+			compatible = "amlogic,meson6-gpio";
+			reg = <0xc110806c 0x4>, <0xc1108070 0x4>, <0xc1108074 0x4>;
+			gpio-controller;
+			#gpio-cells = <2>;
+			ngpios = <32>;
+		};
+
+		mmc@c1108c20 {
+			compatible = "amlogic,meson6-sdio", "amlogic,meson-mx-sdio";
+			reg = <0xc1108c20 0x20>;
+			interrupts = <0 28 1>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			clocks = <&sdio_core_clk>, <&clk81>;
+			clock-names = "core", "clkin";
+			pinctrl-names = "default";
+			pinctrl-0 = <&sdio_b_pins>;
+
+			slot@1 {
+				compatible = "mmc-slot";
+				reg = <1>;
+				bus-width = <4>;
+				max-frequency = <25000000>;
+				cd-gpios = <&gpio_sd 29 1>;
+				vmmc-supply = <&sd_vmmc>;
+			};
+		};
+
 		g04_pinmux: pinmux@c11080b0 {
 			compatible = "pinctrl-single";
 			reg = <0xc11080b0 0x20>;
 			pinctrl-single,register-width = <32>;
 			pinctrl-single,function-mask = <1>;
 			pinctrl-single,bit-per-mux;
+
+			sdio_b_pins: sdio-b-pins {
+				/* Vendor SDIO port B uses CARD_0..5, MUX2[15:10]. */
+				pinctrl-single,bits = <0x08 0x0000fc00 0x0000fc00>;
+			};
 
 			i2c_a_pins: i2c-a-pins {
 				/* PERIPHS_PIN_MUX_5[27:26] selects I2C A. */
