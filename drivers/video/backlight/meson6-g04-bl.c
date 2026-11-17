@@ -10,8 +10,9 @@
 #define G04_PWM_CD_CTRL		4
 #define G04_PWM_D_ENABLE	BIT(1)
 #define G04_PWM_D_CLK_ENABLE	BIT(23)
-#define G04_BL_MAX		255
-#define G04_BL_DEFAULT		128
+/* Match the G04 TWRP brightness scale end to end. */
+#define G04_BL_MAX		1023
+#define G04_BL_DEFAULT		512
 /* 24 MHz oscillator, divider 0: 400 Hz, 12% to 42% duty over the panel's useful range. */
 #define G04_PWM_D_CLK_MASK	((0x7f << 16) | (3 << 6))
 #define G04_BL_PERIOD		60000
